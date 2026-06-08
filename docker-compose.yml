@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  veterinaria_db:
+    image: postgres:15-alpine
+    container_name: veterinaria_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
+      POSTGRES_DB: ${DB_NAME:-veterinaria_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - veterinaria_net
+    restart: unless-stopped
+
+  veterinaria_redis:
+    image: redis:7-alpine
+    container_name: veterinaria_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - veterinaria_net
+    restart: unless-stopped
+
+  veterinaria_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: veterinaria_backend
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8080}:8080"
+    depends_on:
+      - veterinaria_db
+      - veterinaria_redis
+    networks:
+      - veterinaria_net
+    restart: unless-stopped
+
+  veterinaria_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: veterinaria_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - veterinaria_backend
+    networks:
+      - veterinaria_net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  veterinaria_net:
+    driver: bridge

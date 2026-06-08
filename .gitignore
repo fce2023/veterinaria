@@ -1,0 +1,25 @@
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+frontend/node_modules/
+frontend/dist/
+
+# Go
+backend/backend
+*.exe
+*.test
+*.prof
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/

@@ -1,0 +1,114 @@
+package auth
+
+import (
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+)
+
+var jwtSecret []byte
+
+func getJWTSecret() []byte {
+	if len(jwtSecret) == 0 {
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			secret = "veterinaria_default_secret_key_2026"
+		}
+		jwtSecret = []byte(secret)
+	}
+	return jwtSecret
+}
+
+// Claims defines the JWT payload structure
+type Claims struct {
+	UserID    uuid.UUID `json:"user_id"`
+	CompanyID uuid.UUID `json:"company_id"`
+	BranchID  uuid.UUID `json:"branch_id"`
+	jwt.RegisteredClaims
+}
+
+// HashPassword hashes a raw password using bcrypt
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	return string(bytes), err
+}
+
+// CheckPasswordHash compares password hash with raw input
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// GenerateToken creates a JWT for a user session
+func GenerateToken(userID, companyID, branchID uuid.UUID) (string, error) {
+	expirationTime := time.Now().Add(24 * time.Hour)
+	claims := &Claims{
+		UserID:    userID,
+		CompanyID: companyID,
+		BranchID:  branchID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(getJWTSecret())
+}
+
+// ParseToken parses and validates a token string
+func ParseToken(tokenStr string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		return getJWTSecret(), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	return claims, nil
+}
+
+// AuthMiddleware intercepts requests and validates JWT bearer tokens
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Authorization header required"})
+			c.Abort()
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Authorization format must be Bearer <token>"})
+			c.Abort()
+			return
+		}
+
+		claims, err := ParseToken(parts[1])
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Invalid or expired token"})
+			c.Abort()
+			return
+		}
+
+		// Inject details into Gin context
+		c.Set("userID", claims.UserID)
+		c.Set("companyID", claims.CompanyID)
+		c.Set("branchID", claims.BranchID)
+
+		c.Next()
+	}
+}
