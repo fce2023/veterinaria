@@ -35,7 +35,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
     depends_on:
       - veterinaria_db
       - veterinaria_redis
@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
     container_name: veterinaria_frontend
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-8082}:80"
     depends_on:
       - veterinaria_backend
     networks:

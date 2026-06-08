@@ -3,10 +3,10 @@ FROM golang:1.20-alpine AS builder
 WORKDIR /app
 
 COPY go.mod ./
-# Download dependencies
-RUN go mod download
-
 COPY . .
+# Generate go.sum and download dependencies
+RUN go mod tidy && go mod download
+
 RUN CGO_ENABLED=0 GOOS=linux go build -o main .
 
 FROM alpine:3.18
