@@ -41,7 +41,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.GenerateToken(user.ID, user.CompanyID, user.BranchID)
+	token, err := auth.GenerateToken(user.ID, user.CompanyID, user.BranchID, user.RoleType)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Could not generate session token"})
 		return
@@ -61,6 +61,7 @@ func Login(c *gin.Context) {
 				"username":   user.Username,
 				"company_id": user.CompanyID,
 				"branch_id":  user.BranchID,
+				"role_type":  user.RoleType,
 				"roles":      user.Roles,
 			},
 		},
@@ -105,15 +106,18 @@ func CreateCompany(c *gin.Context) {
 
 	tx := config.DB.Begin()
 
-	// 1. Create Company
+	// 1. Create Company with Trial Plan config
 	company := models.Company{
-		RUC:             input.RUC,
-		RazonSocial:     input.RazonSocial,
-		NombreComercial: input.NombreComercial,
-		Direccion:       input.Direccion,
-		Telefono:        input.Telefono,
-		Email:           input.Email,
-		Estado:          "active",
+		RUC:                   input.RUC,
+		RazonSocial:           input.RazonSocial,
+		NombreComercial:       input.NombreComercial,
+		Direccion:             input.Direccion,
+		Telefono:              input.Telefono,
+		Email:                 input.Email,
+		Estado:                "active",
+		PlanType:              "Basic",
+		SubscriptionExpiresAt: time.Now().AddDate(0, 0, 30), // 30 days trial
+		MaxBranches:           1,
 	}
 	if err := tx.Create(&company).Error; err != nil {
 		tx.Rollback()
@@ -128,6 +132,7 @@ func CreateCompany(c *gin.Context) {
 		Direccion: input.Direccion,
 		Telefono:  input.Telefono,
 		Estado:    "active",
+		IsMain:    true,
 	}
 	if err := tx.Create(&branch).Error; err != nil {
 		tx.Rollback()
@@ -151,6 +156,7 @@ func CreateCompany(c *gin.Context) {
 		Username:     input.AdminUsername,
 		PasswordHash: pwdHash,
 		Estado:       "active",
+		RoleType:     "COMPANY_ADMIN", // Owner of the veterinary
 	}
 	if err := tx.Create(&user).Error; err != nil {
 		tx.Rollback()
@@ -189,10 +195,8 @@ func GetCompanies(c *gin.Context) {
 // --- BRANCH HANDLERS (Tenant isolated) ---
 
 func GetBranches(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-
 	var branches []models.Branch
-	if err := config.DB.Where("company_id = ?", companyID).Find(&branches).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Find(&branches).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -201,6 +205,23 @@ func GetBranches(c *gin.Context) {
 
 func CreateBranch(c *gin.Context) {
 	companyID := c.MustGet("companyID").(uuid.UUID)
+
+	// Verify Technical Limits (MaxBranches)
+	var company models.Company
+	if err := config.DB.First(&company, companyID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to check company subscription"})
+		return
+	}
+
+	var currentBranchesCount int64
+	config.DB.Model(&models.Branch{}).Where("company_id = ?", companyID).Count(&currentBranchesCount)
+	if currentBranchesCount >= int64(company.MaxBranches) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Límite de sucursales alcanzado. Por favor, actualiza tu suscripción para agregar más sedes.",
+		})
+		return
+	}
 
 	var branch models.Branch
 	if err := c.ShouldBindJSON(&branch); err != nil {
@@ -218,7 +239,6 @@ func CreateBranch(c *gin.Context) {
 }
 
 func UpdateBranch(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	branchID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -227,7 +247,7 @@ func UpdateBranch(c *gin.Context) {
 	}
 
 	var branch models.Branch
-	if err := config.DB.Where("id = ? AND company_id = ?", branchID, companyID).First(&branch).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", branchID).First(&branch).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Branch not found"})
 		return
 	}
@@ -242,7 +262,6 @@ func UpdateBranch(c *gin.Context) {
 }
 
 func DeleteBranch(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	branchID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -250,7 +269,7 @@ func DeleteBranch(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Where("id = ? AND company_id = ?", branchID, companyID).Delete(&models.Branch{}).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", branchID).Delete(&models.Branch{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete branch"})
 		return
 	}
@@ -261,10 +280,8 @@ func DeleteBranch(c *gin.Context) {
 // --- PRODUCT HANDLERS (Tenant isolated) ---
 
 func GetProducts(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-
 	var products []models.Product
-	if err := config.DB.Where("company_id = ?", companyID).Find(&products).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Find(&products).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -290,7 +307,6 @@ func CreateProduct(c *gin.Context) {
 }
 
 func UpdateProduct(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	productID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -299,7 +315,7 @@ func UpdateProduct(c *gin.Context) {
 	}
 
 	var product models.Product
-	if err := config.DB.Where("id = ? AND company_id = ?", productID, companyID).First(&product).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", productID).First(&product).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Product not found"})
 		return
 	}
@@ -314,7 +330,6 @@ func UpdateProduct(c *gin.Context) {
 }
 
 func DeleteProduct(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	productID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -322,7 +337,7 @@ func DeleteProduct(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Where("id = ? AND company_id = ?", productID, companyID).Delete(&models.Product{}).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", productID).Delete(&models.Product{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete product"})
 		return
 	}

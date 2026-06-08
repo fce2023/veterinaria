@@ -11,9 +11,8 @@ import (
 
 // Categories
 func GetCategories(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	var categories []models.Category
-	if err := config.DB.Where("company_id = ?", companyID).Find(&categories).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Find(&categories).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -36,7 +35,6 @@ func CreateCategory(c *gin.Context) {
 }
 
 func UpdateCategory(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -45,7 +43,7 @@ func UpdateCategory(c *gin.Context) {
 	}
 
 	var category models.Category
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).First(&category).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).First(&category).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Category not found"})
 		return
 	}
@@ -60,7 +58,6 @@ func UpdateCategory(c *gin.Context) {
 }
 
 func DeleteCategory(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -68,7 +65,7 @@ func DeleteCategory(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).Delete(&models.Category{}).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).Delete(&models.Category{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete category"})
 		return
 	}
@@ -77,9 +74,8 @@ func DeleteCategory(c *gin.Context) {
 
 // Brands
 func GetBrands(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	var brands []models.Brand
-	if err := config.DB.Where("company_id = ?", companyID).Find(&brands).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Find(&brands).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -102,7 +98,6 @@ func CreateBrand(c *gin.Context) {
 }
 
 func UpdateBrand(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -111,7 +106,7 @@ func UpdateBrand(c *gin.Context) {
 	}
 
 	var brand models.Brand
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).First(&brand).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).First(&brand).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Brand not found"})
 		return
 	}
@@ -126,7 +121,6 @@ func UpdateBrand(c *gin.Context) {
 }
 
 func DeleteBrand(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -134,7 +128,7 @@ func DeleteBrand(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).Delete(&models.Brand{}).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).Delete(&models.Brand{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete brand"})
 		return
 	}

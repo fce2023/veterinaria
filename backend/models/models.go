@@ -26,23 +26,31 @@ func (base *BaseModel) BeforeCreate(tx *gorm.DB) (err error) {
 // Company represents a client tenant
 type Company struct {
 	BaseModel
-	RUC             string `gorm:"type:varchar(11);uniqueIndex;not null" json:"ruc"`
-	RazonSocial     string `gorm:"type:varchar(255);not null" json:"razon_social"`
-	NombreComercial string `gorm:"type:varchar(255)" json:"nombre_comercial"`
-	Direccion       string `gorm:"type:varchar(500)" json:"direccion"`
-	Telefono        string `gorm:"type:varchar(50)" json:"telefono"`
-	Email           string `gorm:"type:varchar(100)" json:"email"`
-	Estado          string `gorm:"type:varchar(50);default:'active'" json:"estado"` // active, inactive
+	RUC                   string    `gorm:"type:varchar(11);uniqueIndex;not null" json:"ruc"`
+	RazonSocial           string    `gorm:"type:varchar(255);not null" json:"razon_social"`
+	NombreComercial       string    `gorm:"type:varchar(255)" json:"nombre_comercial"`
+	Direccion             string    `gorm:"type:varchar(500)" json:"direccion"`
+	Telefono              string    `gorm:"type:varchar(50)" json:"telefono"`
+	Email                 string    `gorm:"type:varchar(100)" json:"email"`
+	Estado                string    `gorm:"type:varchar(50);default:'active'" json:"estado"` // active, inactive
+	PlanType              string    `gorm:"type:varchar(50);default:'Basic'" json:"plan_type"`
+	SubscriptionExpiresAt time.Time `json:"subscription_expires_at"`
+	MaxBranches           int       `gorm:"type:integer;default:1" json:"max_branches"`
 }
 
 // Branch belongs to a Company
 type Branch struct {
 	BaseModel
-	CompanyID uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
-	Nombre    string    `gorm:"type:varchar(255);not null" json:"nombre"`
-	Direccion string    `gorm:"type:varchar(500)" json:"direccion"`
-	Telefono  string    `gorm:"type:varchar(50)" json:"telefono"`
-	Estado    string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
+	CompanyID    uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
+	Nombre       string    `gorm:"type:varchar(255);not null" json:"nombre"`
+	Direccion    string    `gorm:"type:varchar(500)" json:"direccion"`
+	Telefono     string    `gorm:"type:varchar(50)" json:"telefono"`
+	Email        string    `gorm:"type:varchar(100)" json:"email"`
+	IsMain       bool      `gorm:"type:boolean;default:false" json:"is_main"`
+	Ubigeo       string    `gorm:"type:varchar(6)" json:"ubigeo"`
+	SerieFactura string    `gorm:"type:varchar(4)" json:"serie_factura"`
+	SerieBoleta  string    `gorm:"type:varchar(4)" json:"serie_boleta"`
+	Estado       string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
 }
 
 // Permission defines a policy access code
@@ -84,6 +92,7 @@ type User struct {
 	Username     string    `gorm:"type:varchar(100);uniqueIndex;not null" json:"username"`
 	PasswordHash string    `gorm:"type:varchar(255);not null" json:"-"`
 	Estado       string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
+	RoleType     string    `gorm:"type:varchar(50);default:'BRANCH_USER'" json:"role_type"`
 	Roles        []Role    `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 }
 

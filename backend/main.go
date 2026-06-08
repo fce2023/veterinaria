@@ -81,10 +81,20 @@ func main() {
 		protected := v1.Group("")
 		protected.Use(auth.AuthMiddleware())
 		{
-			// Auth
+			// Auth & Switch Branch
 			protected.GET("/auth/me", handlers.GetMe)
+			protected.POST("/auth/switch-branch", handlers.SwitchBranch)
 
-			// Companies (Admin/SuperAdmin)
+			// SaaS Admin Routes (SuperAdmin restricted)
+			saasAdmin := protected.Group("/saas-admin")
+			saasAdmin.Use(auth.SuperAdminMiddleware())
+			{
+				saasAdmin.GET("/companies", handlers.GetSaaSCompanies)
+				saasAdmin.PUT("/companies/:id/subscription", handlers.UpdateSaaSCompanySubscription)
+				saasAdmin.GET("/stats", handlers.GetSaaSStats)
+			}
+
+			// Companies
 			protected.GET("/companies", handlers.GetCompanies)
 
 			// Branches
@@ -173,18 +183,38 @@ func seedDatabase() {
 		log.Println("Seeded roles: Administrador, Vendedor.")
 	}
 
-	// 2. Default Company, Branch and Admin User
+	// 2. SaaS SuperAdmin User
+	var superAdminCount int64
+	config.DB.Model(&models.User{}).Where("username = ?", "saas_admin").Count(&superAdminCount)
+	if superAdminCount == 0 {
+		pwdHash, _ := auth.HashPassword("saas123")
+		sa := models.User{
+			Nombre:       "Super Administrador SaaS",
+			Email:        "saas@veterinaria.com",
+			Username:     "saas_admin",
+			PasswordHash: pwdHash,
+			Estado:       "active",
+			RoleType:     "SUPER_ADMIN",
+		}
+		config.DB.Create(&sa)
+		log.Println("Seeded SaaS SuperAdmin: saas_admin / saas123")
+	}
+
+	// 3. Default Company, Branch and Admin User
 	var companiesCount int64
 	config.DB.Model(&models.Company{}).Count(&companiesCount)
 	if companiesCount == 0 {
 		company := models.Company{
-			RUC:             "20123456789",
-			RazonSocial:     "Clínica Veterinaria San Martín S.A.C.",
-			NombreComercial: "Veterinaria San Martín",
-			Direccion:       "Av. Universitaria 1234, Lima",
-			Telefono:        "014567890",
-			Email:           "contacto@vetsanmartin.com",
-			Estado:          "active",
+			RUC:                   "20123456789",
+			RazonSocial:           "Clínica Veterinaria San Martín S.A.C.",
+			NombreComercial:       "Veterinaria San Martín",
+			Direccion:             "Av. Universitaria 1234, Lima",
+			Telefono:              "014567890",
+			Email:                 "contacto@vetsanmartin.com",
+			Estado:                "active",
+			PlanType:              "Premium",
+			SubscriptionExpiresAt: time.Now().AddDate(1, 0, 0), // 1 year
+			MaxBranches:           5,
 		}
 		config.DB.Create(&company)
 
@@ -194,6 +224,7 @@ func seedDatabase() {
 			Direccion: "Av. Universitaria 1234, Lima",
 			Telefono:  "014567890",
 			Estado:    "active",
+			IsMain:    true,
 		}
 		config.DB.Create(&branch)
 
@@ -207,6 +238,7 @@ func seedDatabase() {
 			Username:     "admin",
 			PasswordHash: pwdHash,
 			Estado:       "active",
+			RoleType:     "COMPANY_ADMIN",
 		}
 		config.DB.Create(&user)
 

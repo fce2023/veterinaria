@@ -31,6 +31,7 @@ type Claims struct {
 	UserID    uuid.UUID `json:"user_id"`
 	CompanyID uuid.UUID `json:"company_id"`
 	BranchID  uuid.UUID `json:"branch_id"`
+	RoleType  string    `json:"role_type"`
 	jwt.RegisteredClaims
 }
 
@@ -47,12 +48,13 @@ func CheckPasswordHash(password, hash string) bool {
 }
 
 // GenerateToken creates a JWT for a user session
-func GenerateToken(userID, companyID, branchID uuid.UUID) (string, error) {
+func GenerateToken(userID, companyID, branchID uuid.UUID, roleType string) (string, error) {
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
 		UserID:    userID,
 		CompanyID: companyID,
 		BranchID:  branchID,
+		RoleType:  roleType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -108,7 +110,21 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("userID", claims.UserID)
 		c.Set("companyID", claims.CompanyID)
 		c.Set("branchID", claims.BranchID)
+		c.Set("roleType", claims.RoleType)
 
+		c.Next()
+	}
+}
+
+// SuperAdminMiddleware restricts routes to SUPER_ADMIN users
+func SuperAdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleType, exists := c.Get("roleType")
+		if !exists || roleType.(string) != "SUPER_ADMIN" {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Acceso denegado: Se requieren privilegios de Super Administrador"})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }
