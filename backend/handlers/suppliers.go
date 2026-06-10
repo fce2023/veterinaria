@@ -10,9 +10,8 @@ import (
 )
 
 func GetSuppliers(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	var suppliers []models.Supplier
-	if err := config.DB.Where("company_id = ?", companyID).Find(&suppliers).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Find(&suppliers).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -35,7 +34,6 @@ func CreateSupplier(c *gin.Context) {
 }
 
 func UpdateSupplier(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -44,7 +42,7 @@ func UpdateSupplier(c *gin.Context) {
 	}
 
 	var supplier models.Supplier
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).First(&supplier).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).First(&supplier).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Supplier not found"})
 		return
 	}
@@ -59,7 +57,6 @@ func UpdateSupplier(c *gin.Context) {
 }
 
 func DeleteSupplier(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -67,7 +64,7 @@ func DeleteSupplier(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Where("id = ? AND company_id = ?", id, companyID).Delete(&models.Supplier{}).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("id = ?", id).Delete(&models.Supplier{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete supplier"})
 		return
 	}

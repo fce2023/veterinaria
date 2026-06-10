@@ -164,7 +164,7 @@ async function loadCategories() {
   try {
     const res = await axios.get('/categories')
     if (res.data.success) {
-      categories.value = res.data.data
+      categories.value = res.data.data || []
     }
   } catch (err) {
     console.error('Error loading categories', err)
@@ -175,7 +175,7 @@ async function loadBrands() {
   try {
     const res = await axios.get('/brands')
     if (res.data.success) {
-      brands.value = res.data.data
+      brands.value = res.data.data || []
     }
   } catch (err) {
     console.error('Error loading brands', err)

@@ -153,6 +153,7 @@ async function loadStats() {
     const res = await axios.get('/dashboard/stats')
     if (res.data.success) {
       Object.assign(stats, res.data.data)
+      if (!stats.top_products) stats.top_products = []
     }
   } catch (err) {
     console.error('Error loading dashboard stats', err)

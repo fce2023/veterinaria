@@ -330,25 +330,25 @@ onMounted(() => {
 async function loadSuppliers() {
   try {
     const res = await axios.get('/suppliers')
-    if (res.data.success) suppliers.value = res.data.data
+    if (res.data.success) suppliers.value = res.data.data || []
   } catch (err) {
     console.error('Error loading suppliers', err)
   }
 }
 
-async function loadProducts() {
+async function loadStocks() {
   try {
-    const res = await axios.get('/products')
-    if (res.data.success) products.value = res.data.data
+    const res = await axios.get('/stocks')
+    if (res.data.success) stocks.value = res.data.data || []
   } catch (err) {
-    console.error('Error loading products', err)
+    console.error('Error loading stocks', err)
   }
 }
 
 async function loadPurchases() {
   try {
     const res = await axios.get('/purchases')
-    if (res.data.success) purchases.value = res.data.data
+    if (res.data.success) purchases.value = res.data.data || []
   } catch (err) {
     console.error('Error loading purchases', err)
   }

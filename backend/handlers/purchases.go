@@ -22,11 +22,8 @@ type CreatePurchaseInput struct {
 }
 
 func GetPurchases(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-	branchID := c.MustGet("branchID").(uuid.UUID)
-
 	var purchases []models.Purchase
-	if err := config.DB.Preload("Supplier").Where("company_id = ? AND branch_id = ?", companyID, branchID).Order("created_at desc").Find(&purchases).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Order("created_at desc").Find(&purchases).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -34,7 +31,6 @@ func GetPurchases(c *gin.Context) {
 }
 
 func GetPurchaseDetails(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -43,7 +39,7 @@ func GetPurchaseDetails(c *gin.Context) {
 	}
 
 	var purchase models.Purchase
-	if err := config.DB.Preload("Supplier").Where("id = ? AND company_id = ?", id, companyID).First(&purchase).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Where("id = ?", id).First(&purchase).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Purchase not found"})
 		return
 	}

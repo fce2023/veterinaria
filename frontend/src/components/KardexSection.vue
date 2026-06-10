@@ -160,7 +160,7 @@ async function loadStocks() {
   try {
     const res = await axios.get('/stocks')
     if (res.data.success) {
-      stocks.value = res.data.data
+      stocks.value = res.data.data || []
     }
   } catch (err) {
     console.error('Error loading stocks', err)
@@ -175,7 +175,7 @@ async function loadKardex() {
     }
     const res = await axios.get(url)
     if (res.data.success) {
-      kardex.value = res.data.data
+      kardex.value = res.data.data || []
     }
   } catch (err) {
     console.error('Error loading kardex', err)

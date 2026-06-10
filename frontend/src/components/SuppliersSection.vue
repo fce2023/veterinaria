@@ -141,7 +141,7 @@ async function loadSuppliers() {
   try {
     const res = await axios.get('/suppliers')
     if (res.data.success) {
-      suppliers.value = res.data.data
+      suppliers.value = res.data.data || []
     }
   } catch (err) {
     console.error('Error loading suppliers', err)

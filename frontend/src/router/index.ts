@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import Login from '../views/Login.vue'
 import Dashboard from '../views/Dashboard.vue'
+import SaaSAdmin from '../views/SaaSAdmin.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -16,6 +17,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/saas-admin',
+    name: 'SaaSAdmin',
+    component: SaaSAdmin,
+    meta: { requiresAuth: true, requiresSuperAdmin: true }
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/'
   }
@@ -29,16 +36,30 @@ const router = createRouter({
 // Navigation Guard
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
+  const user = JSON.parse(localStorage.getItem('user') || 'null')
 
   if (to.matched.some(record => record.meta.requiresAuth)) {
     if (!token) {
       next('/login')
     } else {
-      next()
+      // Role checking
+      if (to.matched.some(record => record.meta.requiresSuperAdmin)) {
+        if (user && user.role_type === 'SUPER_ADMIN') {
+          next()
+        } else {
+          next('/')
+        }
+      } else {
+        next()
+      }
     }
   } else if (to.matched.some(record => record.meta.guest)) {
     if (token) {
-      next('/')
+      if (user && user.role_type === 'SUPER_ADMIN') {
+        next('/saas-admin')
+      } else {
+        next('/')
+      }
     } else {
       next()
     }

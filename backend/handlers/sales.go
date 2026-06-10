@@ -23,11 +23,8 @@ type CreateSaleInput struct {
 }
 
 func GetSales(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-	branchID := c.MustGet("branchID").(uuid.UUID)
-
 	var sales []models.Sale
-	if err := config.DB.Preload("Customer").Where("company_id = ? AND branch_id = ?", companyID, branchID).Order("created_at desc").Find(&sales).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Customer").Order("created_at desc").Find(&sales).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -35,7 +32,6 @@ func GetSales(c *gin.Context) {
 }
 
 func GetSaleDetails(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -44,7 +40,7 @@ func GetSaleDetails(c *gin.Context) {
 	}
 
 	var sale models.Sale
-	if err := config.DB.Preload("Customer").Where("id = ? AND company_id = ?", id, companyID).First(&sale).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Customer").Where("id = ?", id).First(&sale).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Sale not found"})
 		return
 	}

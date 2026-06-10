@@ -38,6 +38,7 @@ func main() {
 		&models.Purchase{},
 		&models.PurchaseItem{},
 		&models.Customer{},
+		&models.Pet{},
 		&models.Sale{},
 		&models.SaleItem{},
 		&models.BillingConfig{},
@@ -99,33 +100,39 @@ func main() {
 
 			// Branches
 			protected.GET("/branches", handlers.GetBranches)
-			protected.POST("/branches", handlers.CreateBranch)
-			protected.PUT("/branches/:id", handlers.UpdateBranch)
-			protected.DELETE("/branches/:id", handlers.DeleteBranch)
+			protected.POST("/branches", auth.CompanyAdminMiddleware(), handlers.CreateBranch)
+			protected.PUT("/branches/:id", auth.CompanyAdminMiddleware(), handlers.UpdateBranch)
+			protected.DELETE("/branches/:id", auth.CompanyAdminMiddleware(), handlers.DeleteBranch)
+
+			// Users (Personal)
+			protected.GET("/users", auth.BranchAdminMiddleware(), handlers.GetUsers)
+			protected.POST("/users", auth.BranchAdminMiddleware(), handlers.CreateUser)
+			protected.PUT("/users/:id", auth.BranchAdminMiddleware(), handlers.UpdateUser)
+			protected.DELETE("/users/:id", auth.BranchAdminMiddleware(), handlers.DeleteUser)
 
 			// Products
 			protected.GET("/products", handlers.GetProducts)
-			protected.POST("/products", handlers.CreateProduct)
-			protected.PUT("/products/:id", handlers.UpdateProduct)
-			protected.DELETE("/products/:id", handlers.DeleteProduct)
+			protected.POST("/products", auth.CompanyAdminMiddleware(), handlers.CreateProduct)
+			protected.PUT("/products/:id", auth.CompanyAdminMiddleware(), handlers.UpdateProduct)
+			protected.DELETE("/products/:id", auth.CompanyAdminMiddleware(), handlers.DeleteProduct)
 
 			// Categories
 			protected.GET("/categories", handlers.GetCategories)
-			protected.POST("/categories", handlers.CreateCategory)
-			protected.PUT("/categories/:id", handlers.UpdateCategory)
-			protected.DELETE("/categories/:id", handlers.DeleteCategory)
+			protected.POST("/categories", auth.CompanyAdminMiddleware(), handlers.CreateCategory)
+			protected.PUT("/categories/:id", auth.CompanyAdminMiddleware(), handlers.UpdateCategory)
+			protected.DELETE("/categories/:id", auth.CompanyAdminMiddleware(), handlers.DeleteCategory)
 
 			// Brands
 			protected.GET("/brands", handlers.GetBrands)
-			protected.POST("/brands", handlers.CreateBrand)
-			protected.PUT("/brands/:id", handlers.UpdateBrand)
-			protected.DELETE("/brands/:id", handlers.DeleteBrand)
+			protected.POST("/brands", auth.CompanyAdminMiddleware(), handlers.CreateBrand)
+			protected.PUT("/brands/:id", auth.CompanyAdminMiddleware(), handlers.UpdateBrand)
+			protected.DELETE("/brands/:id", auth.CompanyAdminMiddleware(), handlers.DeleteBrand)
 
 			// Suppliers
 			protected.GET("/suppliers", handlers.GetSuppliers)
-			protected.POST("/suppliers", handlers.CreateSupplier)
-			protected.PUT("/suppliers/:id", handlers.UpdateSupplier)
-			protected.DELETE("/suppliers/:id", handlers.DeleteSupplier)
+			protected.POST("/suppliers", auth.CompanyAdminMiddleware(), handlers.CreateSupplier)
+			protected.PUT("/suppliers/:id", auth.CompanyAdminMiddleware(), handlers.UpdateSupplier)
+			protected.DELETE("/suppliers/:id", auth.CompanyAdminMiddleware(), handlers.DeleteSupplier)
 
 			// Customers
 			protected.GET("/customers", handlers.GetCustomers)
@@ -133,10 +140,16 @@ func main() {
 			protected.PUT("/customers/:id", handlers.UpdateCustomer)
 			protected.DELETE("/customers/:id", handlers.DeleteCustomer)
 
+			// Pets
+			protected.GET("/pets", handlers.GetPets)
+			protected.POST("/pets", handlers.CreatePet)
+			protected.PUT("/pets/:id", handlers.UpdatePet)
+			protected.DELETE("/pets/:id", handlers.DeletePet)
+
 			// Purchases
-			protected.GET("/purchases", handlers.GetPurchases)
-			protected.GET("/purchases/:id", handlers.GetPurchaseDetails)
-			protected.POST("/purchases", handlers.CreatePurchase)
+			protected.GET("/purchases", auth.BranchAdminMiddleware(), handlers.GetPurchases)
+			protected.GET("/purchases/:id", auth.BranchAdminMiddleware(), handlers.GetPurchaseDetails)
+			protected.POST("/purchases", auth.BranchAdminMiddleware(), handlers.CreatePurchase)
 
 			// Sales
 			protected.GET("/sales", handlers.GetSales)
@@ -148,7 +161,11 @@ func main() {
 			protected.GET("/kardex", handlers.GetKardex)
 
 			// Dashboard Stats
-			protected.GET("/dashboard/stats", handlers.GetDashboardStats)
+			protected.GET("/dashboard/stats", auth.BranchAdminMiddleware(), handlers.GetDashboardStats)
+
+			// Billing Configuration
+			protected.GET("/billing/config", auth.CompanyAdminMiddleware(), handlers.GetBillingConfig)
+			protected.POST("/billing/config", auth.CompanyAdminMiddleware(), handlers.SaveBillingConfig)
 		}
 	}
 
@@ -249,5 +266,104 @@ func seedDatabase() {
 		}
 
 		log.Println("Seeded default tenant: Company='Veterinaria San Martín', Branch='Sede Principal', User='admin/admin123'.")
+		
+		// Seed additional test data for the default tenant
+		seedTestData(company, branch)
+	} else {
+		// Company exists, let's check if we need to seed products
+		var company models.Company
+		var branch models.Branch
+		if err := config.DB.First(&company).Error; err == nil {
+			if err := config.DB.First(&branch, "company_id = ?", company.ID).Error; err == nil {
+				var productsCount int64
+				config.DB.Model(&models.Product{}).Count(&productsCount)
+				if productsCount == 0 {
+					seedTestData(company, branch)
+				}
+			}
+		}
 	}
+}
+
+func seedTestData(company models.Company, branch models.Branch) {
+	log.Println("Seeding test data (Categories, Brands, Products, Customers, Suppliers)...")
+
+	// Categories
+	cat1 := models.Category{CompanyID: company.ID, Nombre: "Alimentos"}
+	cat2 := models.Category{CompanyID: company.ID, Nombre: "Medicinas"}
+	cat3 := models.Category{CompanyID: company.ID, Nombre: "Accesorios"}
+	config.DB.Create(&cat1)
+	config.DB.Create(&cat2)
+	config.DB.Create(&cat3)
+
+	// Brands
+	b1 := models.Brand{CompanyID: company.ID, Nombre: "Ricocan"}
+	b2 := models.Brand{CompanyID: company.ID, Nombre: "Bravecto"}
+	b3 := models.Brand{CompanyID: company.ID, Nombre: "KONG"}
+	config.DB.Create(&b1)
+	config.DB.Create(&b2)
+	config.DB.Create(&b3)
+
+	// Products
+	p1 := models.Product{
+		CompanyID:    company.ID,
+		CategoryID:   cat1.ID,
+		BrandID:      b1.ID,
+		Codigo:       "PROD-001",
+		Nombre:       "Ricocan Adulto 15kg",
+		PrecioCompra: 120.00,
+		PrecioVenta:  150.00,
+		StockMinimo:  5,
+		Estado:       "active",
+	}
+	p2 := models.Product{
+		CompanyID:    company.ID,
+		CategoryID:   cat2.ID,
+		BrandID:      b2.ID,
+		Codigo:       "PROD-002",
+		Nombre:       "Pastilla Bravecto 10-20kg",
+		PrecioCompra: 60.00,
+		PrecioVenta:  95.00,
+		StockMinimo:  2,
+		Estado:       "active",
+	}
+	config.DB.Create(&p1)
+	config.DB.Create(&p2)
+
+	// Stock
+	config.DB.Create(&models.Stock{CompanyID: company.ID, BranchID: branch.ID, ProductID: p1.ID, StockActual: 10})
+	config.DB.Create(&models.Stock{CompanyID: company.ID, BranchID: branch.ID, ProductID: p2.ID, StockActual: 15})
+
+	// Customers
+	c1 := models.Customer{
+		CompanyID:       company.ID,
+		TipoDocumento:   "DNI",
+		NumeroDocumento: "12345678",
+		Nombre:          "Juan Perez",
+		Email:           "juan.perez@example.com",
+		Telefono:        "987654321",
+	}
+	config.DB.Create(&c1)
+
+	// Pets
+	config.DB.Create(&models.Pet{
+		CompanyID:  company.ID,
+		CustomerID: c1.ID,
+		Nombre:     "Fido",
+		Especie:    "Perro",
+		Raza:       "Mestizo",
+		Sexo:       "Macho",
+		Peso:       15.5,
+	})
+
+	// Suppliers
+	s1 := models.Supplier{
+		CompanyID:   company.ID,
+		RUC:         "20987654321",
+		RazonSocial: "Distribuidora Mascotas SAC",
+		Direccion:   "Av. Los Pinos 456",
+		Telefono:    "012345678",
+	}
+	config.DB.Create(&s1)
+	log.Println("Test data successfully seeded.")
 }

@@ -128,3 +128,37 @@ func SuperAdminMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// CompanyAdminMiddleware restricts routes to COMPANY_ADMIN and SUPER_ADMIN users
+func CompanyAdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleType, exists := c.Get("roleType")
+		if !exists || (roleType.(string) != "SUPER_ADMIN" && roleType.(string) != "COMPANY_ADMIN") {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Acceso denegado: Se requieren privilegios de Administrador de Empresa"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// BranchAdminMiddleware restricts routes to BRANCH_ADMIN, COMPANY_ADMIN and SUPER_ADMIN users
+func BranchAdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleType, exists := c.Get("roleType")
+		if !exists {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Acceso denegado"})
+			c.Abort()
+			return
+		}
+		
+		role := roleType.(string)
+		if role != "SUPER_ADMIN" && role != "COMPANY_ADMIN" && role != "BRANCH_ADMIN" {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Acceso denegado: Se requieren privilegios de Encargado de Sucursal o superior"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+

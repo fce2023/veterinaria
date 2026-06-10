@@ -180,7 +180,7 @@ type PurchaseItem struct {
 	CostoUnitario float64   `gorm:"type:numeric(12,4);not null" json:"costo_unitario"`
 }
 
-// Customer for sales
+// Customer for sales and owners of pets
 type Customer struct {
 	BaseModel
 	CompanyID       uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
@@ -189,6 +189,22 @@ type Customer struct {
 	Nombre          string    `gorm:"type:varchar(255);not null" json:"nombre"`
 	Direccion       string    `gorm:"type:varchar(500)" json:"direccion"`
 	Telefono        string    `gorm:"type:varchar(50)" json:"telefono"`
+	Email           string    `gorm:"type:varchar(100)" json:"email"`
+	Pets            []Pet     `gorm:"foreignKey:CustomerID" json:"pets,omitempty"`
+}
+
+// Pet belongs to a Customer
+type Pet struct {
+	BaseModel
+	CompanyID  uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
+	CustomerID uuid.UUID `gorm:"type:uuid;not null;index" json:"customer_id"`
+	Nombre     string    `gorm:"type:varchar(255);not null" json:"nombre"`
+	Especie    string    `gorm:"type:varchar(100)" json:"especie"` // Perro, Gato, etc.
+	Raza       string    `gorm:"type:varchar(100)" json:"raza"`
+	Sexo       string    `gorm:"type:varchar(20)" json:"sexo"` // Macho, Hembra
+	FechaNac   *time.Time `json:"fecha_nac"`
+	Peso       float64   `gorm:"type:numeric(12,2)" json:"peso"`
+	Notas      string    `gorm:"type:text" json:"notas"`
 }
 
 // Sale header

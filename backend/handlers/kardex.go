@@ -10,17 +10,14 @@ import (
 )
 
 func GetStocks(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-	branchID := c.MustGet("branchID").(uuid.UUID)
-
 	var products []models.Product
-	if err := config.DB.Where("company_id = ? AND estado = 'active'", companyID).Find(&products).Error; err != nil {
+	if err := config.DB.Scopes(config.TenantFilter(c)).Where("estado = 'active'").Find(&products).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
 	var stocks []models.Stock
-	if err := config.DB.Where("company_id = ? AND branch_id = ?", companyID, branchID).Find(&stocks).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Find(&stocks).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -49,11 +46,8 @@ func GetStocks(c *gin.Context) {
 }
 
 func GetKardex(c *gin.Context) {
-	companyID := c.MustGet("companyID").(uuid.UUID)
-	branchID := c.MustGet("branchID").(uuid.UUID)
-
 	var movements []models.Kardex
-	query := config.DB.Where("company_id = ? AND branch_id = ?", companyID, branchID)
+	query := config.DB.Scopes(config.BranchFilter(c))
 
 	productIDStr := c.Query("product_id")
 	if productIDStr != "" {

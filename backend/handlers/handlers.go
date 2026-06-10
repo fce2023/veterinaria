@@ -358,3 +358,4 @@ func logAudit(userID uuid.UUID, modulo, accion, descripcion, ip string) {
 	}
 	config.DB.Create(&log)
 }
+
