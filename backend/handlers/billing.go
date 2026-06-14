@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 	"veterinaria/backend/config"
 	"veterinaria/backend/models"
@@ -16,7 +17,16 @@ import (
 
 // GetBillingConfig retrieves the billing configuration for the company
 func GetBillingConfig(c *gin.Context) {
-	companyID, _ := c.Get("companyID")
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Formato de ID de empresa inválido"})
+		return
+	}
 	
 	var billingConfig models.BillingConfig
 	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
@@ -35,8 +45,16 @@ func GetBillingConfig(c *gin.Context) {
 
 // SaveBillingConfig creates or updates the billing configuration
 func SaveBillingConfig(c *gin.Context) {
-	companyIDRaw, _ := c.Get("companyID")
-	companyID := companyIDRaw.(uuid.UUID)
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
 
 	var input struct {
 		ApiURL            string `json:"api_url"`
@@ -110,7 +128,7 @@ func SaveBillingConfig(c *gin.Context) {
 		if uuidStr == "" {
 			logs = append(logs, fmt.Sprintf("Buscando empresa con RUC %s en FacturaAPI...", company.RUC))
 			
-			reqSearch, err := http.NewRequest("GET", apiURL+"/api/v1/companies/search?ruc="+company.RUC, nil)
+			reqSearch, err := http.NewRequest("GET", apiURL+"/api/v1/companies/search?ruc="+url.QueryEscape(company.RUC), nil)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar búsqueda de empresa: " + err.Error()})
 				return
@@ -165,7 +183,7 @@ func SaveBillingConfig(c *gin.Context) {
 
 				if respReg.StatusCode != http.StatusCreated && respReg.StatusCode != http.StatusOK {
 					c.JSON(http.StatusBadGateway, gin.H{
-						"success":   true,
+						"success":   false,
 						"logs":      logs,
 						"api_error": fmt.Sprintf("Error registro FacturaAPI (%d): %s", respReg.StatusCode, string(bodyBytes)),
 					})
@@ -217,8 +235,8 @@ func SaveBillingConfig(c *gin.Context) {
 			bodyCredBytes, _ := io.ReadAll(respCred.Body)
 
 			if respCred.StatusCode != http.StatusOK && respCred.StatusCode != http.StatusAccepted {
-				c.JSON(http.StatusOK, gin.H{
-					"success":   true,
+				c.JSON(http.StatusBadGateway, gin.H{
+					"success":   false,
 					"logs":      logs,
 					"api_error": fmt.Sprintf("Error credenciales FacturaAPI (%d): %s", respCred.StatusCode, string(bodyCredBytes)),
 				})
@@ -254,8 +272,8 @@ func SaveBillingConfig(c *gin.Context) {
 				bodyCertBytes, _ := io.ReadAll(respCert.Body)
 
 				if respCert.StatusCode != http.StatusOK && respCert.StatusCode != http.StatusAccepted {
-					c.JSON(http.StatusOK, gin.H{
-						"success":   true,
+					c.JSON(http.StatusBadGateway, gin.H{
+						"success":   false,
 						"logs":      logs,
 						"api_error": fmt.Sprintf("Error certificado FacturaAPI (%d): %s", respCert.StatusCode, string(bodyCertBytes)),
 					})
@@ -290,8 +308,21 @@ func SaveBillingConfig(c *gin.Context) {
 
 // GetBillingFiles retrieves the XML, PDF and CDR download links from FacturaAPI
 func GetBillingFiles(c *gin.Context) {
-	companyID, _ := c.Get("companyID")
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
 	docUUID := c.Param("uuid")
+	if _, err := uuid.Parse(docUUID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido (debe ser un UUID)"})
+		return
+	}
 
 	var billingConfig models.BillingConfig
 	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
