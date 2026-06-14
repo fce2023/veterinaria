@@ -34,11 +34,16 @@ func SaveBillingConfig(c *gin.Context) {
 	companyID := companyIDRaw.(uuid.UUID)
 
 	var input struct {
-		ApiURL     string `json:"api_url"`
-		ApiKey     string `json:"api_key"`
-		TenantUUID string `json:"tenant_uuid"`
-		Modo       string `json:"modo"`
-		Estado     string `json:"estado"`
+		ApiURL            string `json:"api_url"`
+		ApiKey            string `json:"api_key"`
+		TenantUUID        string `json:"tenant_uuid"`
+		Modo              string `json:"modo"`
+		Estado            string `json:"estado"`
+		SolUser           string `json:"sol_user"`
+		SolPass           string `json:"sol_pass"`
+		CertificadoBase64 string `json:"certificado_base64"`
+		ClientID          string `json:"client_id"`
+		ClientSecret      string `json:"client_secret"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -55,6 +60,13 @@ func SaveBillingConfig(c *gin.Context) {
 	billingConfig.TenantUUID = input.TenantUUID
 	billingConfig.Modo = input.Modo
 	billingConfig.Estado = input.Estado
+	billingConfig.SolUser = input.SolUser
+	billingConfig.SolPass = input.SolPass
+	billingConfig.ClientID = input.ClientID
+	billingConfig.ClientSecret = input.ClientSecret
+	if input.CertificadoBase64 != "" {
+		billingConfig.CertificadoBase64 = input.CertificadoBase64
+	}
 
 	if err != nil {
 		// Create new
