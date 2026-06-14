@@ -187,6 +187,83 @@ func SaveBillingConfig(c *gin.Context) {
 		
 		// Update DB BillingConfig struct to hold final TenantUUID
 		billingConfig.TenantUUID = uuidStr
+
+		// Step B: PATCH Credentials
+		if uuidStr != "" {
+			logs = append(logs, "Sincronizando credenciales SUNAT/API GRE...")
+			credPayload := map[string]string{
+				"usuario_sol":   input.SolUser,
+				"clave_sol":     input.SolPass,
+				"client_id":     input.ClientID,
+				"client_secret": input.ClientSecret,
+			}
+			jsonCreds, _ := json.Marshal(credPayload)
+
+			reqCred, err := http.NewRequest("PATCH", apiURL+"/api/v1/config/"+uuidStr+"/sunat-credentials", bytes.NewBuffer(jsonCreds))
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar PATCH credenciales: " + err.Error()})
+				return
+			}
+			reqCred.Header.Set("Authorization", "Bearer "+apiKey)
+			reqCred.Header.Set("Content-Type", "application/json")
+			reqCred.Header.Set("Accept", "application/json")
+
+			respCred, err := client.Do(reqCred)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error de conexión al sincronizar credenciales: " + err.Error()})
+				return
+			}
+			defer respCred.Body.Close()
+			bodyCredBytes, _ := io.ReadAll(respCred.Body)
+
+			if respCred.StatusCode != http.StatusOK && respCred.StatusCode != http.StatusAccepted {
+				c.JSON(http.StatusOK, gin.H{
+					"success":   true,
+					"logs":      logs,
+					"api_error": fmt.Sprintf("Error credenciales FacturaAPI (%d): %s", respCred.StatusCode, string(bodyCredBytes)),
+				})
+				return
+			}
+			logs = append(logs, "Credenciales SUNAT/API GRE sincronizadas correctamente.")
+
+			// Step C: POST Certificate
+			if input.CertificadoBase64 != "" {
+				logs = append(logs, "Subiendo certificado digital .p12...")
+				certPayload := map[string]string{
+					"certificate_base64": input.CertificadoBase64,
+					"password":           input.SolPass,
+					"extension":          "p12",
+				}
+				jsonCert, _ := json.Marshal(certPayload)
+
+				reqCert, err := http.NewRequest("POST", apiURL+"/api/v1/config/"+uuidStr+"/certificate", bytes.NewBuffer(jsonCert))
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar subida de certificado: " + err.Error()})
+					return
+				}
+				reqCert.Header.Set("Authorization", "Bearer "+apiKey)
+				reqCert.Header.Set("Content-Type", "application/json")
+				reqCert.Header.Set("Accept", "application/json")
+
+				respCert, err := client.Do(reqCert)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error de conexión al subir certificado: " + err.Error()})
+					return
+				}
+				defer respCert.Body.Close()
+				bodyCertBytes, _ := io.ReadAll(respCert.Body)
+
+				if respCert.StatusCode != http.StatusOK && respCert.StatusCode != http.StatusAccepted {
+					c.JSON(http.StatusOK, gin.H{
+						"success":   true,
+						"logs":      logs,
+						"api_error": fmt.Sprintf("Error certificado FacturaAPI (%d): %s", respCert.StatusCode, string(bodyCertBytes)),
+					})
+					return
+				}
+				logs = append(logs, "Certificado digital subido y firmado correctamente.")
+			}
+		}
 	}
 
 	if err != nil {
