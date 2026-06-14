@@ -60,7 +60,7 @@
         </button>
 
         <button 
-          v-if="authStore.isCompanyAdmin || authStore.isSuperAdmin"
+          v-if="authStore.isCompanyAdmin"
           @click="selectSection('branches')" 
           :class="[navBtnClass, currentSection === 'branches' ? navBtnActive : navBtnInactive]"
         >
@@ -69,7 +69,7 @@
         </button>
 
         <button 
-          v-if="authStore.isCompanyAdmin || authStore.isSuperAdmin || authStore.isBranchAdmin"
+          v-if="authStore.isCompanyAdmin || authStore.isBranchAdmin"
           @click="selectSection('users')" 
           :class="[navBtnClass, currentSection === 'users' ? navBtnActive : navBtnInactive]"
         >
@@ -80,7 +80,7 @@
         <p class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Inventario</p>
         
         <button 
-          v-if="authStore.isCompanyAdmin || authStore.isSuperAdmin"
+          v-if="authStore.isCompanyAdmin"
           @click="selectSection('categories')" 
           :class="[navBtnClass, currentSection === 'categories' ? navBtnActive : navBtnInactive]"
         >
@@ -108,7 +108,7 @@
         <p class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Operaciones</p>
         
         <button 
-          v-if="authStore.isCompanyAdmin || authStore.isSuperAdmin"
+          v-if="authStore.isCompanyAdmin"
           @click="selectSection('suppliers')" 
           :class="[navBtnClass, currentSection === 'suppliers' ? navBtnActive : navBtnInactive]"
         >
@@ -142,7 +142,27 @@
         </button>
 
         <button 
-          v-if="authStore.isCompanyAdmin || authStore.isSuperAdmin"
+          @click="selectSection('cash')" 
+          :class="[navBtnClass, currentSection === 'cash' ? navBtnActive : navBtnInactive]"
+        >
+          <i class="pi pi-wallet text-sm"></i>
+          <span>Caja / Arqueo</span>
+        </button>
+
+        <!-- Sistema Section -->
+        <p v-if="authStore.isCompanyAdmin" class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Sistema</p>
+
+        <button 
+          v-if="authStore.isCompanyAdmin"
+          @click="selectSection('business')" 
+          :class="[navBtnClass, currentSection === 'business' ? navBtnActive : navBtnInactive]"
+        >
+          <i class="pi pi-building text-sm"></i>
+          <span>Configuración</span>
+        </button>
+
+        <button 
+          v-if="authStore.isCompanyAdmin && authStore.hasModule('facturacion')"
           @click="selectSection('billing')" 
           :class="[navBtnClass, currentSection === 'billing' ? navBtnActive : navBtnInactive]"
         >
@@ -208,8 +228,10 @@
         <SuppliersSection v-if="currentSection === 'suppliers'" />
         <PurchasesSection v-if="currentSection === 'purchases'" />
         <KardexSection v-if="currentSection === 'kardex'" />
-        <SalesSection v-if="currentSection === 'sales'" />
+        <SalesSection v-if="currentSection === 'sales'" @navigate="currentSection = $event" />
+        <CashSection v-if="currentSection === 'cash'" />
         <BillingSection v-if="currentSection === 'billing'" />
+        <BusinessSection v-if="currentSection === 'business'" />
         <BranchesSection v-if="currentSection === 'branches'" />
         <UsersSection v-if="currentSection === 'users'" />
       </section>
@@ -255,6 +277,8 @@ import PurchasesSection from '../components/PurchasesSection.vue'
 import KardexSection from '../components/KardexSection.vue'
 import SalesSection from '../components/SalesSection.vue'
 import BillingSection from '../components/BillingSection.vue'
+import BusinessSection from '../components/BusinessSection.vue'
+import CashSection from '../components/CashSection.vue'
 import BranchesSection from '../components/BranchesSection.vue'
 import UsersSection from '../components/UsersSection.vue'
 import BranchSelector from '../components/BranchSelector.vue'
@@ -290,7 +314,9 @@ function getSectionLabel(section: string) {
     'purchases': 'Compras',
     'customers': 'Clientes',
     'sales': 'Ventas / POS',
-    'billing': 'Facturación',
+    'cash': 'Caja / Arqueo',
+    'billing': 'Facturación Electrónica',
+    'business': 'Configuración del Negocio',
     'users': 'Personal y Roles'
   }
   return labels[section] || 'Inicio'
