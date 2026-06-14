@@ -20,6 +20,7 @@ export interface User {
   branch_id: string
   role_type: string
   roles?: Array<{ nombre: string }>
+  modules?: string[]
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -38,6 +39,14 @@ export const useAuthStore = defineStore('auth', {
     isAdmin: (state) => {
       if (!state.user) return false
       return state.user.role_type === 'SUPER_ADMIN' || state.user.role_type === 'COMPANY_ADMIN'
+    },
+    hasModule: (state) => (key: string) => {
+      return state.user?.modules?.includes(key) ?? false
+    },
+    homeRoute: (state) => {
+      if (!state.user) return '/login'
+      if (state.user.role_type === 'SUPER_ADMIN') return '/saas-admin'
+      return '/'
     }
   },
   actions: {
@@ -100,12 +109,17 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     logout() {
+      const wasSuperAdmin = this.user?.role_type === 'SUPER_ADMIN'
       this.token = ''
       this.user = null
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       delete axios.defaults.headers.common['Authorization']
-      window.location.href = '/login'
+      if (wasSuperAdmin) {
+        window.location.href = '/saas-admin/login'
+      } else {
+        window.location.href = '/login'
+      }
     }
   }
 })

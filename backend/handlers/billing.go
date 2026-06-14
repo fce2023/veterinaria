@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"time"
@@ -186,10 +188,12 @@ func SaveBillingConfig(c *gin.Context) {
 				bodyBytes, _ := io.ReadAll(respReg.Body)
 
 				if respReg.StatusCode != http.StatusCreated && respReg.StatusCode != http.StatusOK {
+					errMsg := fmt.Sprintf("Error registro FacturaAPI (%d): %s", respReg.StatusCode, string(bodyBytes))
 					c.JSON(http.StatusBadGateway, gin.H{
 						"success":   false,
 						"logs":      logs,
-						"api_error": fmt.Sprintf("Error registro FacturaAPI (%d): %s", respReg.StatusCode, string(bodyBytes)),
+						"api_error": errMsg,
+						"error":     errMsg,
 					})
 					return
 				}
@@ -239,10 +243,12 @@ func SaveBillingConfig(c *gin.Context) {
 			bodyCredBytes, _ := io.ReadAll(respCred.Body)
 
 			if respCred.StatusCode != http.StatusOK && respCred.StatusCode != http.StatusAccepted {
+				errMsg := fmt.Sprintf("Error credenciales FacturaAPI (%d): %s", respCred.StatusCode, string(bodyCredBytes))
 				c.JSON(http.StatusBadGateway, gin.H{
 					"success":   false,
 					"logs":      logs,
-					"api_error": fmt.Sprintf("Error credenciales FacturaAPI (%d): %s", respCred.StatusCode, string(bodyCredBytes)),
+					"api_error": errMsg,
+					"error":     errMsg,
 				})
 				return
 			}
@@ -283,14 +289,59 @@ func SaveBillingConfig(c *gin.Context) {
 				bodyCertBytes, _ := io.ReadAll(respCert.Body)
 
 				if respCert.StatusCode != http.StatusOK && respCert.StatusCode != http.StatusAccepted {
+					errMsg := fmt.Sprintf("Error certificado FacturaAPI (%d): %s", respCert.StatusCode, string(bodyCertBytes))
 					c.JSON(http.StatusBadGateway, gin.H{
 						"success":   false,
 						"logs":      logs,
-						"api_error": fmt.Sprintf("Error certificado FacturaAPI (%d): %s", respCert.StatusCode, string(bodyCertBytes)),
+						"api_error": errMsg,
+						"error":     errMsg,
 					})
 					return
 				}
 				logs = append(logs, "Certificado digital subido y firmado correctamente.")
+			}
+
+			// Step D: POST Logo (Multipart/form-data)
+			if company.LogoBase64 != "" {
+				logs = append(logs, "Sincronizando logo comercial con FacturaAPI (Multipart)...")
+
+				// Decode base64 to binary
+				imgData, err := base64.StdEncoding.DecodeString(company.LogoBase64)
+				if err != nil {
+					logs = append(logs, "Error al decodificar logo base64: "+err.Error())
+				} else {
+					body := &bytes.Buffer{}
+					writer := multipart.NewWriter(body)
+					part, err := writer.CreateFormFile("logo", "logo.png")
+					if err != nil {
+						logs = append(logs, "Error al crear form file: "+err.Error())
+					} else {
+						_, _ = io.Copy(part, bytes.NewReader(imgData))
+						writer.Close()
+
+						reqLogo, err := http.NewRequest("POST", apiURL+"/api/v1/config/"+uuidStr+"/logo", body)
+						if err != nil {
+							logs = append(logs, "Error al preparar subida de logo: "+err.Error())
+						} else {
+							reqLogo.Header.Set("Authorization", "Bearer "+apiKey)
+							reqLogo.Header.Set("Content-Type", writer.FormDataContentType())
+							reqLogo.Header.Set("Accept", "application/json")
+
+							respLogo, err := client.Do(reqLogo)
+							if err != nil {
+								logs = append(logs, "Error de conexión al subir logo: "+err.Error())
+							} else {
+								defer respLogo.Body.Close()
+								if respLogo.StatusCode != http.StatusOK && respLogo.StatusCode != http.StatusAccepted {
+									bodyLogoBytes, _ := io.ReadAll(respLogo.Body)
+									logs = append(logs, fmt.Sprintf("Error logo FacturaAPI (%d): %s", respLogo.StatusCode, string(bodyLogoBytes)))
+								} else {
+									logs = append(logs, "Logo comercial sincronizado correctamente.")
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -395,5 +446,192 @@ func GetBillingFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,
+	})
+}
+
+// GetElectronicDocuments retrieves all electronic documents for the company with optional filters
+func GetElectronicDocuments(c *gin.Context) {
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
+
+	query := config.DB.Where("electronic_documents.company_id = ?", companyID)
+
+	// Filter by document type
+	tipo := c.Query("tipo_documento")
+	if tipo != "" {
+		query = query.Where("electronic_documents.tipo_documento = ?", tipo)
+	}
+
+	// Filter by state
+	estado := c.Query("estado")
+	if estado != "" {
+		query = query.Where("electronic_documents.estado = ?", estado)
+	}
+
+	// Search by series or number
+	search := c.Query("search")
+	if search != "" {
+		query = query.Where("electronic_documents.serie ILIKE ? OR electronic_documents.numero ILIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	// Filter by date range
+	fechaDesde := c.Query("fecha_desde")
+	if fechaDesde != "" {
+		query = query.Where("electronic_documents.created_at >= ?", fechaDesde)
+	}
+	fechaHasta := c.Query("fecha_hasta")
+	if fechaHasta != "" {
+		query = query.Where("electronic_documents.created_at <= ?", fechaHasta+" 23:59:59")
+	}
+
+	var docs []models.ElectronicDocument
+	if err := query.Preload("Sale").Preload("Sale.Customer").Order("electronic_documents.created_at desc").Find(&docs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    docs,
+		"total":   len(docs),
+	})
+}
+
+// GetDocumentStats returns summary counts grouped by tipo_documento and estado
+func GetDocumentStats(c *gin.Context) {
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
+
+	type StatRow struct {
+		TipoDocumento string `json:"tipo_documento"`
+		Estado        string `json:"estado"`
+		Count         int64  `json:"count"`
+	}
+
+	var rows []StatRow
+	config.DB.Model(&models.ElectronicDocument{}).
+		Select("tipo_documento, estado, count(*) as count").
+		Where("company_id = ?", companyID).
+		Group("tipo_documento, estado").
+		Scan(&rows)
+
+	// Also get totals per type
+	type TotalRow struct {
+		TipoDocumento string `json:"tipo_documento"`
+		Total         int64  `json:"total"`
+	}
+	var totals []TotalRow
+	config.DB.Model(&models.ElectronicDocument{}).
+		Select("tipo_documento, count(*) as total").
+		Where("company_id = ?", companyID).
+		Group("tipo_documento").
+		Scan(&totals)
+
+	var grandTotal int64
+	config.DB.Model(&models.ElectronicDocument{}).
+		Where("company_id = ?", companyID).
+		Count(&grandTotal)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"data":        rows,
+		"totals":      totals,
+		"grand_total": grandTotal,
+	})
+}
+
+// GetBillingSeries returns all branches of the company with their series/correlative configuration
+func GetBillingSeries(c *gin.Context) {
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
+
+	var branches []models.Branch
+	if err := config.DB.Where("company_id = ?", companyID).Find(&branches).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    branches,
+	})
+}
+
+// UpdateBillingSeries updates series and correlative settings for a specific branch
+func UpdateBillingSeries(c *gin.Context) {
+	companyIDRaw, exists := c.Get("companyID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Sesión inválida"})
+		return
+	}
+	companyID, ok := companyIDRaw.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Formato de ID de empresa inválido"})
+		return
+	}
+
+	branchIDStr := c.Param("branchId")
+	branchID, err := uuid.Parse(branchIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de sucursal inválido"})
+		return
+	}
+
+	var branch models.Branch
+	if err := config.DB.Where("id = ? AND company_id = ?", branchID, companyID).First(&branch).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Sucursal no encontrada"})
+		return
+	}
+
+	var input struct {
+		SerieFactura       string `json:"serie_factura"`
+		SerieBoleta        string `json:"serie_boleta"`
+		CorrelativoFactura int    `json:"correlativo_factura"`
+		CorrelativoBoleta  int    `json:"correlativo_boleta"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	branch.SerieFactura = input.SerieFactura
+	branch.SerieBoleta = input.SerieBoleta
+	branch.CorrelativoFactura = input.CorrelativoFactura
+	branch.CorrelativoBoleta = input.CorrelativoBoleta
+
+	if err := config.DB.Save(&branch).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al guardar la configuración"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Series y correlativos actualizados correctamente",
+		"data":    branch,
 	})
 }

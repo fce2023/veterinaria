@@ -39,6 +39,8 @@ func GetStocks(c *gin.Context) {
 			"stock_minimo":   p.StockMinimo,
 			"stock_actual":   stockVal,
 			"estado":         p.Estado,
+			"is_dimensional": p.IsDimensional,
+			"unidad_medida":   p.UnidadMedida,
 		})
 	}
 

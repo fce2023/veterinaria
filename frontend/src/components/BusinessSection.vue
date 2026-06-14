@@ -58,7 +58,7 @@
             <input
               ref="logoInput"
               type="file"
-              accept="image/png,image/jpeg,image/svg+xml,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/gif"
               @change="handleBusinessLogoUpload"
               class="hidden-file"
             />
@@ -70,7 +70,17 @@
                 Remover
               </button>
             </div>
-            <p class="logo-hint">PNG, JPG o SVG. Recomendado: 200×200 px</p>
+            <div v-if="logoCompressing" class="logo-compressing">
+              <svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              Optimizando imagen...
+            </div>
+            <p class="logo-hint">
+              PNG / JPG / WebP &bull; Máx. 800×800px<br/>
+              <span v-if="logoFileSize" :class="logoFileSize > 200 ? 'hint-warn' : 'hint-ok'">
+                {{ logoFileSize }}KB comprimido
+              </span>
+              <span v-else>Se optimiza automáticamente</span>
+            </p>
           </div>
 
           <!-- Hero Info -->
@@ -205,6 +215,8 @@ import axios from 'axios'
 const loading = ref(true)
 const savingBusiness = ref(false)
 const logoInput = ref<HTMLInputElement | null>(null)
+const logoCompressing = ref(false)
+const logoFileSize = ref<number | null>(null)
 const businessAlert = reactive({ msg: '', type: 'success' as 'success' | 'error' })
 
 const business = reactive({
@@ -225,17 +237,92 @@ const triggerLogoInput = () => logoInput.value?.click()
 
 const removeLogo = () => {
   business.logo_base64 = ''
+  logoFileSize.value = null
 }
 
-const handleBusinessLogoUpload = (event: any) => {
-  const file = event.target.files[0]
+/**
+ * Compress image using an offscreen canvas before storing as base64.
+ * - Resizes to max 800x800 preserving aspect ratio
+ * - Tries JPEG @ 80% quality first; falls back to PNG if smaller
+ * - Returns base64 string WITHOUT the data:...;base64, prefix
+ */
+async function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const MAX_DIM = 400
+      let { width, height } = img
+      if (width > MAX_DIM || height > MAX_DIM) {
+        if (width > height) {
+          height = Math.round((height * MAX_DIM) / width)
+          width = MAX_DIM
+        } else {
+          width = Math.round((width * MAX_DIM) / height)
+          height = MAX_DIM
+        }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')!
+      // White background for JPEG (avoids black on transparency)
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, width, height)
+      ctx.drawImage(img, 0, 0, width, height)
+
+      // Try JPEG first
+      const jpegData = canvas.toDataURL('image/jpeg', 0.75)
+      // Try PNG (better for logos with few colors)
+      const pngData = canvas.toDataURL('image/png')
+
+      // Pick the smaller one
+      const chosen = jpegData.length <= pngData.length ? jpegData : pngData
+      // Strip the data URI prefix (e.g. "data:image/jpeg;base64,")
+      resolve(chosen.split(',')[1])
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      reject(new Error('No se pudo cargar la imagen'))
+    }
+    img.src = objectUrl
+  })
+}
+
+const handleBusinessLogoUpload = async (event: any) => {
+  const file: File = event.target.files[0]
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = (e: any) => {
-    const base64Data = e.target.result.split(',')[1]
-    business.logo_base64 = base64Data
+
+  // Validate file type
+  if (!file.type.startsWith('image/')) {
+    businessAlert.msg = 'Solo se permiten archivos de imagen (PNG, JPG, WebP).'
+    businessAlert.type = 'error'
+    return
   }
-  reader.readAsDataURL(file)
+
+  // Validate raw size (hard limit: 20MB to prevent browser freeze)
+  if (file.size > 20 * 1024 * 1024) {
+    businessAlert.msg = 'La imagen es demasiado grande (máx. 20MB). Por favor, usa una imagen más pequeña.'
+    businessAlert.type = 'error'
+    return
+  }
+
+  logoCompressing.value = true
+  logoFileSize.value = null
+  try {
+    const compressed = await compressImage(file)
+    business.logo_base64 = compressed
+    // Estimate KB: base64 length × 0.75
+    logoFileSize.value = Math.round((compressed.length * 0.75) / 1024)
+  } catch (err) {
+    businessAlert.msg = 'Error al procesar la imagen. Intenta con otro archivo.'
+    businessAlert.type = 'error'
+  } finally {
+    logoCompressing.value = false
+    // Reset input so same file can be re-selected
+    if (logoInput.value) logoInput.value.value = ''
+  }
 }
 
 async function loadBusinessProfile() {

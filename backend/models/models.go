@@ -39,16 +39,18 @@ type Company struct {
 // Branch belongs to a Company
 type Branch struct {
 	BaseModel
-	CompanyID    uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
-	Nombre       string    `gorm:"type:varchar(255);not null" json:"nombre"`
-	Direccion    string    `gorm:"type:varchar(500)" json:"direccion"`
-	Telefono     string    `gorm:"type:varchar(50)" json:"telefono"`
-	Email        string    `gorm:"type:varchar(100)" json:"email"`
-	IsMain       bool      `gorm:"type:boolean;default:false" json:"is_main"`
-	Ubigeo       string    `gorm:"type:varchar(6)" json:"ubigeo"`
-	SerieFactura string    `gorm:"type:varchar(4)" json:"serie_factura"`
-	SerieBoleta  string    `gorm:"type:varchar(4)" json:"serie_boleta"`
-	Estado       string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
+	CompanyID          uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
+	Nombre             string    `gorm:"type:varchar(255);not null" json:"nombre"`
+	Direccion          string    `gorm:"type:varchar(500)" json:"direccion"`
+	Telefono           string    `gorm:"type:varchar(50)" json:"telefono"`
+	Email              string    `gorm:"type:varchar(100)" json:"email"`
+	IsMain             bool      `gorm:"type:boolean;default:false" json:"is_main"`
+	Ubigeo             string    `gorm:"type:varchar(6)" json:"ubigeo"`
+	SerieFactura       string    `gorm:"type:varchar(4)" json:"serie_factura"`
+	SerieBoleta        string    `gorm:"type:varchar(4)" json:"serie_boleta"`
+	CorrelativoFactura int       `gorm:"type:integer;default:0" json:"correlativo_factura"`
+	CorrelativoBoleta  int       `gorm:"type:integer;default:0" json:"correlativo_boleta"`
+	Estado             string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
 }
 
 // Permission defines a policy access code
@@ -259,6 +261,7 @@ type ElectronicDocument struct {
 	BaseModel
 	CompanyID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"company_id"`
 	SaleID       *uuid.UUID `gorm:"type:uuid;index" json:"sale_id,omitempty"`
+	Sale         *Sale      `gorm:"foreignKey:SaleID" json:"sale,omitempty"`
 	DocumentUUID string     `gorm:"type:varchar(255);uniqueIndex" json:"document_uuid"`
 	TipoDocumento string     `gorm:"type:varchar(2);not null" json:"tipo_documento"` // 01=Factura, 03=Boleta, etc.
 	Serie        string     `gorm:"type:varchar(4);not null" json:"serie"`

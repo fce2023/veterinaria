@@ -29,7 +29,16 @@
 
         <!-- Supplier Select -->
         <div>
-          <label class="block text-xs font-bold text-slate-600 mb-1.5">Proveedor</label>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-bold text-slate-600">Proveedor</label>
+            <button 
+              type="button" 
+              @click="showQuickSupplierModal = true" 
+              class="text-[10px] font-black text-emerald-600 hover:text-emerald-800 uppercase tracking-widest flex items-center gap-1"
+            >
+              <i class="pi pi-plus text-[8px]"></i> Nuevo
+            </button>
+          </div>
           <select
             v-model="purchaseForm.supplier_id"
             required
@@ -40,26 +49,49 @@
               {{ sup.razon_social }} (RUC: {{ sup.ruc }})
             </option>
           </select>
-          <div v-if="suppliers.length === 0" class="text-[10px] text-red-500 mt-1">
-            * Registra proveedores primero en la sección de Proveedores.
-          </div>
         </div>
 
         <div class="border-t border-slate-100 pt-4 space-y-4">
           <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Agregar Ítem</h4>
           
-          <!-- Product Select -->
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Producto</label>
-            <select
-              v-model="itemInput.product_id"
-              class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+          <!-- Product Autocomplete Search -->
+          <div class="relative">
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Producto / SKU / Barras</label>
+            <div class="relative">
+              <input 
+                ref="searchInputRef"
+                v-model="productSearchQuery"
+                @focus="showProductDropdown = true"
+                type="text"
+                placeholder="Escribe para buscar..."
+                class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+              />
+              <button 
+                v-if="productSearchQuery" 
+                type="button" 
+                @click="productSearchQuery = ''; itemInput.product_id = ''" 
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <i class="pi pi-times text-[10px]"></i>
+              </button>
+            </div>
+            
+            <!-- Floating list -->
+            <div 
+              v-if="showProductDropdown && filteredProductsList.length > 0" 
+              class="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100"
             >
-              <option value="">-- Seleccionar Producto --</option>
-              <option v-for="prod in products" :key="prod.id" :value="prod.id">
-                {{ prod.nombre }} (Cód: {{ prod.codigo || '-' }})
-              </option>
-            </select>
+              <button
+                v-for="prod in filteredProductsList"
+                :key="prod.id"
+                type="button"
+                @click="selectProduct(prod)"
+                class="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex flex-col transition-colors"
+              >
+                <span class="font-bold text-slate-900">{{ prod.nombre }}</span>
+                <span class="text-[10px] text-slate-400 mt-0.5">Código: {{ prod.codigo || '-' }} | Stock: S/. {{ prod.precio_venta }}</span>
+              </button>
+            </div>
           </div>
 
           <!-- Quantity and Unit Cost -->
@@ -89,7 +121,7 @@
           <button
             type="button"
             @click="addItem"
-            class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+            class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm"
           >
             <i class="pi pi-plus-circle"></i>
             <span>Agregar al Detalle</span>
@@ -118,8 +150,27 @@
               <tbody class="divide-y divide-slate-100 text-xs text-slate-700">
                 <tr v-for="(item, idx) in purchaseForm.items" :key="idx" class="hover:bg-slate-50/50">
                   <td class="py-3 px-4 font-semibold text-slate-900">{{ getProductName(item.product_id) }}</td>
-                  <td class="py-3 px-4 text-center font-mono">{{ item.cantidad }}</td>
-                  <td class="py-3 px-4 text-right font-mono">S/. {{ item.costo_unitario.toFixed(2) }}</td>
+                  <td class="py-2 px-2 text-center">
+                    <input 
+                      v-model.number="item.cantidad"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      class="w-16 px-2 py-1 border border-slate-200 rounded-lg text-center font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                    />
+                  </td>
+                  <td class="py-2 px-2 text-right">
+                    <div class="flex items-center justify-end gap-1">
+                      <span class="text-[10px] text-slate-400">S/.</span>
+                      <input 
+                        v-model.number="item.costo_unitario"
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        class="w-20 px-2 py-1 border border-slate-200 rounded-lg text-right font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                      />
+                    </div>
+                  </td>
                   <td class="py-3 px-4 text-right font-semibold font-mono text-slate-900">
                     S/. {{ (item.cantidad * item.costo_unitario).toFixed(2) }}
                   </td>
@@ -284,17 +335,152 @@
         </div>
       </div>
     </div>
+
+    <!-- Quick Add Supplier Modal -->
+    <div v-if="showQuickSupplierModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <form @submit.prevent="handleQuickSupplierSubmit" class="space-y-4">
+          <div>
+            <h3 class="text-base font-extrabold text-slate-900">Agregar Proveedor Rápido</h3>
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Crea un proveedor sin cerrar el formulario de compras</p>
+          </div>
+          <div class="space-y-3">
+            <div class="flex items-center gap-2 mb-1 px-1">
+              <input 
+                id="quickGenericSupplier"
+                v-model="quickSupplierIsGeneric"
+                type="checkbox"
+                class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <label for="quickGenericSupplier" class="text-[10px] font-bold text-slate-600 uppercase tracking-wider cursor-pointer">
+                Sin RUC / Proveedor Genérico
+              </label>
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-1">RUC (11 dígitos)</label>
+              <div class="relative">
+                <input 
+                  v-model="quickSupplierRUC"
+                  type="text"
+                  required
+                  maxlength="11"
+                  :disabled="quickSupplierIsGeneric"
+                  class="block w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:opacity-60"
+                  placeholder="Ej. 20123456789"
+                />
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <i v-if="quickSupplierLoading" class="pi pi-spin pi-spinner text-emerald-600"></i>
+                  <i v-else class="pi pi-search text-xs"></i>
+                </div>
+              </div>
+              <span v-if="!quickSupplierIsGeneric" class="text-[8px] text-slate-400 font-bold uppercase tracking-wider mt-1 block px-0.5">Se consultará SUNAT al completar 11 dígitos</span>
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-1">Razón Social</label>
+              <input 
+                v-model="quickSupplierName"
+                type="text"
+                required
+                class="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                placeholder="Ej. Distribuidora Veterinaria S.A.C."
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-1">Dirección</label>
+              <input 
+                v-model="quickSupplierAddress"
+                type="text"
+                class="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                placeholder="Ej. Av. Industrial 500, Lima"
+              />
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button 
+              type="button" 
+              @click="showQuickSupplierModal = false" 
+              class="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+            >
+              Cancelar
+            </button>
+            <button 
+              type="submit" 
+              :disabled="quickSupplierSaving"
+              class="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl disabled:opacity-50 transition-all"
+            >
+              <span v-if="quickSupplierSaving">Guardando...</span>
+              <span v-else>Guardar</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, onUnmounted, reactive, computed, watch } from 'vue'
 import axios from 'axios'
 
 const activeSubTab = ref('create')
 const suppliers = ref<any[]>([])
 const products = ref<any[]>([])
 const purchases = ref<any[]>([])
+const stocks = ref<any[]>([])
+
+// Zero friction search filters
+const productSearchQuery = ref('')
+const showProductDropdown = ref(false)
+
+// Quick add Supplier variables
+const showQuickSupplierModal = ref(false)
+const quickSupplierName = ref('')
+const quickSupplierRUC = ref('')
+const quickSupplierAddress = ref('')
+const quickSupplierSaving = ref(false)
+const quickSupplierLoading = ref(false)
+const quickSupplierIsGeneric = ref(false)
+
+watch(() => quickSupplierRUC.value, async (newVal) => {
+  if (quickSupplierIsGeneric.value) return
+  const cleanRuc = newVal.trim()
+  if (cleanRuc.length === 11) {
+    quickSupplierLoading.value = true
+    try {
+      const res = await axios.get(`/public/ruc/${cleanRuc}`)
+      if (res.data.success && res.data.data) {
+        const d = res.data.data
+        quickSupplierName.value = d.razon_social || d.nombre_o_razon_social || d.razonSocial || d.nombre || ''
+        
+        let address = d.direccion || d.direccion_completa || ''
+        if (!address || address.trim() === '-') {
+          const parts = []
+          if (d.departamento && d.departamento !== '-') parts.push(d.departamento)
+          if (d.provincia && d.provincia !== '-') parts.push(d.provincia)
+          if (d.distrito && d.distrito !== '-') parts.push(d.distrito)
+          address = parts.join(' - ')
+        }
+        quickSupplierAddress.value = address
+      }
+    } catch (err) {
+      console.error('Error querying RUC', err)
+    } finally {
+      quickSupplierLoading.value = false
+    }
+  }
+})
+
+watch(() => quickSupplierIsGeneric.value, (newVal) => {
+  if (newVal) {
+    quickSupplierRUC.value = '00000000000'
+    quickSupplierName.value = 'PROVEEDOR VARIOS / GENÉRICO'
+    quickSupplierAddress.value = 'LIMA'
+  } else {
+    quickSupplierRUC.value = ''
+    quickSupplierName.value = ''
+    quickSupplierAddress.value = ''
+  }
+})
 
 const purchaseForm = reactive({
   supplier_id: '',
@@ -310,6 +496,19 @@ const itemInput = reactive({
 const showModal = ref(false)
 const selectedPurchase = ref<any>(null)
 
+// Focus ref handlers
+const searchInputRef = ref<HTMLInputElement | null>(null)
+
+const filteredProductsList = computed(() => {
+  const q = productSearchQuery.value.toLowerCase().trim()
+  if (!q) return products.value
+  return products.value.filter(p => 
+    p.nombre.toLowerCase().includes(q) || 
+    (p.codigo && p.codigo.toLowerCase().includes(q)) ||
+    (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q))
+  )
+})
+
 const calculatedTotal = computed(() => {
   return purchaseForm.items.reduce((sum, item) => sum + (item.cantidad * item.costo_unitario), 0)
 })
@@ -322,10 +521,109 @@ const calculatedIGV = computed(() => {
   return calculatedTotal.value - calculatedSubtotal.value
 })
 
+
+
+let barcodeBuffer = ''
+let lastKeyTime = 0
+
+const handleGlobalKeyPress = (e: KeyboardEvent) => {
+  const target = e.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
+    return
+  }
+
+  const currentTime = Date.now()
+  if (currentTime - lastKeyTime > 50) {
+    barcodeBuffer = ''
+  }
+
+  lastKeyTime = currentTime
+
+  if (e.key !== 'Enter') {
+    if (e.key.length === 1 && /[0-9a-zA-Z]/.test(e.key)) {
+      barcodeBuffer += e.key
+    }
+  } else {
+    if (barcodeBuffer.length >= 4) {
+      e.preventDefault()
+      
+      // Look for the product with this barcode or code in products list
+      const foundProduct = products.value.find(p => 
+        (p.codigo && p.codigo === barcodeBuffer) || 
+        (p.codigo_barras && p.codigo_barras === barcodeBuffer)
+      )
+
+      if (foundProduct) {
+        // Auto add to detail items or autofill input
+        const existsIdx = purchaseForm.items.findIndex(item => item.product_id === foundProduct.id)
+        if (existsIdx !== -1) {
+          purchaseForm.items[existsIdx].cantidad += 1
+        } else {
+          purchaseForm.items.push({
+            product_id: foundProduct.id,
+            cantidad: 1,
+            costo_unitario: foundProduct.precio_compra || 1.00
+          })
+        }
+      } else {
+        alert(`Producto con código o barras "${barcodeBuffer}" no encontrado en el catálogo.`)
+      }
+      
+      barcodeBuffer = ''
+    }
+  }
+}
+
 onMounted(() => {
+  window.addEventListener('keypress', handleGlobalKeyPress)
   loadSuppliers()
   loadProducts()
 })
+
+onUnmounted(() => {
+  window.removeEventListener('keypress', handleGlobalKeyPress)
+})
+
+async function loadProducts() {
+  try {
+    const res = await axios.get('/products')
+    if (res.data.success) products.value = res.data.data || []
+  } catch (err) {
+    console.error('Error loading products', err)
+  }
+}
+
+async function handleQuickSupplierSubmit() {
+  if (!quickSupplierName.value.trim() || !quickSupplierRUC.value.trim()) return
+  quickSupplierSaving.value = true
+  try {
+    const res = await axios.post('/suppliers', {
+      razon_social: quickSupplierName.value,
+      ruc: quickSupplierRUC.value,
+      direccion: quickSupplierAddress.value
+    })
+    if (res.data.success) {
+      suppliers.value.push(res.data.data)
+      purchaseForm.supplier_id = res.data.data.id
+      quickSupplierName.value = ''
+      quickSupplierRUC.value = ''
+      quickSupplierAddress.value = ''
+      quickSupplierIsGeneric.value = false
+      showQuickSupplierModal.value = false
+    }
+  } catch (err) {
+    alert('Error al agregar el proveedor rápido')
+  } finally {
+    quickSupplierSaving.value = false
+  }
+}
+
+function selectProduct(prod: any) {
+  itemInput.product_id = prod.id
+  itemInput.costo_unitario = prod.precio_compra || 1.00
+  productSearchQuery.value = prod.nombre
+  showProductDropdown.value = false
+}
 
 async function loadSuppliers() {
   try {
@@ -379,10 +677,15 @@ function addItem() {
     })
   }
 
-  // Reset item inputs
+  // Reset item inputs and autofocus search
   itemInput.product_id = ''
   itemInput.cantidad = 1
   itemInput.costo_unitario = 1.00
+  productSearchQuery.value = ''
+  
+  if (searchInputRef.value) {
+    searchInputRef.value.focus()
+  }
 }
 
 function removeItem(idx: number) {

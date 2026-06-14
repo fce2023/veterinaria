@@ -63,8 +63,16 @@
             <tr v-for="item in filteredProducts" :key="item.id" class="hover:bg-slate-50/50 transition-colors group">
               <td class="py-5 px-6">
                 <div class="flex flex-col">
-                  <span class="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{{ item.nombre }}</span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{{ item.nombre }}</span>
+                    <span v-if="item.is_dimensional" class="px-1.5 py-0.5 text-[8px] bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold uppercase rounded-md">
+                      {{ item.unidad_medida }}
+                    </span>
+                  </div>
                   <span class="text-[10px] font-black text-slate-400 mt-0.5">{{ item.codigo || 'SIN-COD' }}</span>
+                  <span v-if="item.codigo_barras" class="text-[9px] text-slate-400 font-bold flex items-center gap-1 mt-0.5">
+                    <i class="pi pi-barcode text-[10px]"></i> {{ item.codigo_barras }}
+                  </span>
                 </div>
               </td>
               <td class="py-5 px-6">
@@ -117,6 +125,9 @@
               </span>
               <h4 class="font-black text-slate-900 text-lg leading-tight">{{ item.nombre }}</h4>
               <span class="text-[10px] font-bold text-slate-400 mt-1">CÓD: {{ item.codigo || 'N/A' }}</span>
+              <span v-if="item.codigo_barras" class="text-[9px] text-slate-400 font-bold flex items-center gap-1 mt-0.5">
+                <i class="pi pi-barcode"></i> {{ item.codigo_barras }}
+              </span>
             </div>
             <span 
               :class="[
@@ -188,28 +199,130 @@
                   type="text"
                   required
                   class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-                  placeholder="Ej. Nexgard Spectra XL"
+                  :placeholder="productPlaceholder"
                 />
+                <span class="text-[10px] text-slate-400 font-medium mt-1 block px-1">{{ productHelperText }}</span>
               </div>
 
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Código</label>
+                  <div class="flex items-center justify-between mb-2 px-1">
+                    <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Código (SKU)</label>
+                    <button 
+                      type="button" 
+                      @click="autogenerateCode" 
+                      class="text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest flex items-center gap-1"
+                    >
+                      <i class="pi pi-cog text-[9px]"></i> Auto
+                    </button>
+                  </div>
                   <input
                     v-model="productForm.codigo"
+                    @input="validateCodeUniqueness"
                     type="text"
-                    class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                    class="block w-full px-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                    :class="codeError ? 'border-red-400 bg-red-50/10 text-red-900' : 'border-slate-200'"
                     placeholder="P-001"
                   />
+                  <span v-if="codeError" class="text-[9px] text-red-500 font-bold mt-1 block px-1">{{ codeError }}</span>
                 </div>
                 <div>
-                  <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Categoría</label>
+                  <div class="flex items-center justify-between mb-2 px-1">
+                    <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Categoría</label>
+                    <button 
+                      type="button" 
+                      @click="showQuickCategoryModal = true" 
+                      class="text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest flex items-center gap-1"
+                    >
+                      <i class="pi pi-plus text-[8px]"></i> Nueva
+                    </button>
+                  </div>
                   <select 
                     v-model="productForm.category_id"
                     class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"
                   >
                     <option value="">General</option>
                     <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.nombre }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Brand and Barcode Row -->
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <div class="flex items-center justify-between mb-2 px-1">
+                    <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Código de Barras</label>
+                    <button 
+                      type="button" 
+                      @click="autogenerateBarcode" 
+                      class="text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest flex items-center gap-1"
+                    >
+                      <i class="pi pi-cog text-[9px]"></i> Auto
+                    </button>
+                  </div>
+                  <div class="relative">
+                    <input
+                      v-model="productForm.codigo_barras"
+                      @input="validateBarcodeUniqueness"
+                      type="text"
+                      class="block w-full pl-5 pr-10 py-4 bg-slate-50 border rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                      :class="barcodeError ? 'border-red-400 bg-red-50/10 text-red-900' : 'border-slate-200'"
+                      placeholder="EAN-13, UPC o interno"
+                    />
+                    <div class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      <i class="pi pi-barcode text-lg"></i>
+                    </div>
+                  </div>
+                  <span v-if="barcodeError" class="text-[9px] text-red-500 font-bold mt-1 block px-1">{{ barcodeError }}</span>
+                  <span class="text-[8px] text-slate-400 font-bold uppercase tracking-wider mt-1 block px-1">Puedes usar pistola lectora</span>
+                </div>
+                <div>
+                  <div class="flex items-center justify-between mb-2 px-1">
+                    <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Marca</label>
+                    <button 
+                      type="button" 
+                      @click="showQuickBrandModal = true" 
+                      class="text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest flex items-center gap-1"
+                    >
+                      <i class="pi pi-plus text-[8px]"></i> Nueva
+                    </button>
+                  </div>
+                  <select 
+                    v-model="productForm.brand_id"
+                    class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"
+                  >
+                    <option value="">Sin marca</option>
+                    <option v-for="brand in brands" :key="brand.id" :value="brand.id">{{ brand.nombre }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Dimensional Settings -->
+              <div class="bg-slate-50 p-6 rounded-3xl border border-slate-200/60 space-y-4">
+                <div class="flex items-center gap-3">
+                  <input
+                    v-model="productForm.is_dimensional"
+                    type="checkbox"
+                    id="is_dimensional"
+                    class="w-5 h-5 text-indigo-600 border-slate-300 rounded-lg focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <label for="is_dimensional" class="text-xs font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Producto Dimensional (M, M², M³)
+                  </label>
+                </div>
+                
+                <div v-if="productForm.is_dimensional" class="animate-fade-in space-y-2">
+                  <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Unidad de Medida</label>
+                  <select 
+                    v-model="productForm.unidad_medida"
+                    class="block w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"
+                  >
+                    <option value="und">Unidad (UND)</option>
+                    <option value="m">Metro Lineal (M)</option>
+                    <option value="m2">Metro Cuadrado (M²)</option>
+                    <option value="m3">Metro Cúbico (M³)</option>
+                    <option value="kg">Kilogramo (KG)</option>
+                    <option value="lt">Litro (LT)</option>
                   </select>
                 </div>
               </div>
@@ -267,14 +380,135 @@
       </div>
     </div>
   </div>
+
+  <!-- Quick Add Category Modal -->
+  <div v-if="showQuickCategoryModal" class="fixed inset-0 z-[60] overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div class="fixed inset-0 transition-opacity" aria-hidden="true" @click="showQuickCategoryModal = false">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+      </div>
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+      <div class="inline-block align-bottom bg-white rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full border border-slate-100">
+        <form @submit.prevent="handleQuickCategorySubmit" class="p-6 space-y-4">
+          <div>
+            <h3 class="text-lg font-black text-slate-900 tracking-tight">Agregar Categoría Rápida</h3>
+            <p class="text-[10px] text-indigo-500 font-black uppercase tracking-widest mt-1">Crea una categoría sin cerrar el formulario</p>
+          </div>
+          <div class="space-y-2">
+            <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Nombre de la Categoría</label>
+            <input 
+              v-model="quickCategoryName"
+              type="text"
+              required
+              class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+              placeholder="Ej. Accesorios de Aluminio"
+            />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button 
+              type="button" 
+              @click="showQuickCategoryModal = false" 
+              class="px-4 py-2 text-xs font-black text-slate-500 uppercase hover:bg-slate-100 rounded-xl"
+            >
+              Cancelar
+            </button>
+            <button 
+              type="submit" 
+              :disabled="quickCategorySaving"
+              class="px-4 py-2 text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50"
+            >
+              <span v-if="quickCategorySaving">Guardando...</span>
+              <span v-else>Guardar</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Add Brand Modal -->
+  <div v-if="showQuickBrandModal" class="fixed inset-0 z-[60] overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div class="fixed inset-0 transition-opacity" aria-hidden="true" @click="showQuickBrandModal = false">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+      </div>
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+      <div class="inline-block align-bottom bg-white rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full border border-slate-100">
+        <form @submit.prevent="handleQuickBrandSubmit" class="p-6 space-y-4">
+          <div>
+            <h3 class="text-lg font-black text-slate-900 tracking-tight">Agregar Marca Rápida</h3>
+            <p class="text-[10px] text-indigo-500 font-black uppercase tracking-widest mt-1">Crea una marca sin cerrar el formulario</p>
+          </div>
+          <div class="space-y-2">
+            <label class="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Nombre de la Marca</label>
+            <input 
+              v-model="quickBrandName"
+              type="text"
+              required
+              class="block w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+              placeholder="Ej. MIROX"
+            />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button 
+              type="button" 
+              @click="showQuickBrandModal = false" 
+              class="px-4 py-2 text-xs font-black text-slate-500 uppercase hover:bg-slate-100 rounded-xl"
+            >
+              Cancelar
+            </button>
+            <button 
+              type="submit" 
+              :disabled="quickBrandSaving"
+              class="px-4 py-2 text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50"
+            >
+              <span v-if="quickBrandSaving">Guardando...</span>
+              <span v-else>Guardar</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, onUnmounted, reactive, computed } from 'vue'
 import axios from 'axios'
+import { useAuthStore } from '../store/auth'
+
+const authStore = useAuthStore()
+
+// Check if the current tenant has the glass store (vidrieria) module active
+const isVidrieria = computed(() => {
+  return authStore.user?.modules?.includes('vidrieria') && !authStore.user?.modules?.includes('veterinaria')
+})
+
+const isBoth = computed(() => {
+  return authStore.user?.modules?.includes('vidrieria') && authStore.user?.modules?.includes('veterinaria')
+})
+
+const productPlaceholder = computed(() => {
+  if (isVidrieria.value) {
+    return 'Ej. Vidrio Templado 6mm Incoloro'
+  }
+  return 'Ej. Nexgard Spectra XL'
+})
+
+const productHelperText = computed(() => {
+  if (isVidrieria.value) {
+    return 'Nombre descriptivo del vidrio, perfil o accesorio'
+  }
+  if (isBoth.value) {
+    return 'Nombre del producto o artículo general'
+  }
+  return 'Nombre descriptivo del fármaco, vacuna o alimento'
+})
+
 
 const products = ref<any[]>([])
 const categories = ref<any[]>([])
+const brands = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const searchQuery = ref('')
@@ -282,14 +516,30 @@ const filterCategory = ref('')
 const showCreateModal = ref(false)
 const editingId = ref<string | null>(null)
 
+// Quick add sub-modal variables
+const showQuickCategoryModal = ref(false)
+const quickCategoryName = ref('')
+const quickCategorySaving = ref(false)
+
+const showQuickBrandModal = ref(false)
+const quickBrandName = ref('')
+const quickBrandSaving = ref(false)
+
+// Inline Validation Error states
+const codeError = ref('')
+const barcodeError = ref('')
+
 const productForm = reactive({
   nombre: '',
   codigo: '',
   codigo_barras: '',
   category_id: '',
+  brand_id: '',
   precio_compra: 0,
   precio_venta: 0,
-  estado: 'active'
+  estado: 'active',
+  is_dimensional: false,
+  unidad_medida: 'und'
 })
 
 const filteredProducts = computed(() => {
@@ -305,9 +555,62 @@ const filteredProducts = computed(() => {
   })
 })
 
+
+
+let barcodeBuffer = ''
+let lastKeyTime = 0
+
+const handleGlobalKeyPress = (e: KeyboardEvent) => {
+  const target = e.target as HTMLElement
+  // Ignore inputs unless it's the barcode input or body keypresses
+  if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
+    // If the user is currently typing in the barcode field, we don't intercept
+    if (target.getAttribute('placeholder') === 'EAN-13, UPC o interno') {
+      return
+    }
+  }
+
+  const currentTime = Date.now()
+  // Barcode scanners typically send keys very quickly (< 30ms apart)
+  if (currentTime - lastKeyTime > 50) {
+    barcodeBuffer = ''
+  }
+
+  lastKeyTime = currentTime
+
+  if (e.key !== 'Enter') {
+    if (e.key.length === 1 && /[0-9a-zA-Z]/.test(e.key)) {
+      barcodeBuffer += e.key
+    }
+  } else {
+    // If we have a buffer (meaning a scanner scanned a barcode)
+    if (barcodeBuffer.length >= 4) {
+      e.preventDefault()
+      
+      if (showCreateModal.value) {
+        productForm.codigo_barras = barcodeBuffer
+        validateBarcodeUniqueness()
+      } else {
+        // If modal is not open, use it to search products immediately
+        searchQuery.value = barcodeBuffer
+      }
+      
+      barcodeBuffer = ''
+    }
+  }
+}
+
 onMounted(async () => {
-  await loadCategories()
-  await loadProducts()
+  window.addEventListener('keypress', handleGlobalKeyPress)
+  await Promise.all([
+    loadCategories(),
+    loadBrands(),
+    loadProducts()
+  ])
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keypress', handleGlobalKeyPress)
 })
 
 async function loadCategories() {
@@ -316,6 +619,108 @@ async function loadCategories() {
     if (res.data.success) categories.value = res.data.data || []
   } catch (err) {
     console.error('Error loading categories', err)
+  }
+}
+
+async function loadBrands() {
+  try {
+    const res = await axios.get('/brands')
+    if (res.data.success) brands.value = res.data.data || []
+  } catch (err) {
+    console.error('Error loading brands', err)
+  }
+}
+
+async function handleQuickCategorySubmit() {
+  if (!quickCategoryName.value.trim()) return
+  quickCategorySaving.value = true
+  try {
+    const res = await axios.post('/categories', { nombre: quickCategoryName.value })
+    if (res.data.success) {
+      categories.value.push(res.data.data)
+      productForm.category_id = res.data.data.id
+      quickCategoryName.value = ''
+      showQuickCategoryModal.value = false
+    }
+  } catch (err) {
+    alert('Error al agregar la categoría rápida')
+  } finally {
+    quickCategorySaving.value = false
+  }
+}
+
+async function handleQuickBrandSubmit() {
+  if (!quickBrandName.value.trim()) return
+  quickBrandSaving.value = true
+  try {
+    const res = await axios.post('/brands', { nombre: quickBrandName.value })
+    if (res.data.success) {
+      brands.value.push(res.data.data)
+      productForm.brand_id = res.data.data.id
+      quickBrandName.value = ''
+      showQuickBrandModal.value = false
+    }
+  } catch (err) {
+    alert('Error al agregar la marca rápida')
+  } finally {
+    quickBrandSaving.value = false
+  }
+}
+
+async function autogenerateCode() {
+  try {
+    const res = await axios.get('/products/next-code')
+    if (res.data.success) {
+      productForm.codigo = res.data.next_code
+      codeError.value = ''
+    }
+  } catch (err) {
+    console.error('Error generating next code', err)
+  }
+}
+
+function autogenerateBarcode() {
+  // Generate a standard internal Code128-compatible numeric barcode: date timestamp based
+  const timestamp = Date.now().toString()
+  productForm.codigo_barras = '750' + timestamp.substring(timestamp.length - 10)
+  barcodeError.value = ''
+}
+
+async function validateCodeUniqueness() {
+  if (!productForm.codigo.trim()) {
+    codeError.value = ''
+    return
+  }
+  try {
+    const params: any = { codigo: productForm.codigo }
+    if (editingId.value) params.exclude_id = editingId.value
+    const res = await axios.get('/products/validate-uniqueness', { params })
+    if (res.data.success && !res.data.valid) {
+      codeError.value = res.data.message
+    } else {
+      codeError.value = ''
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function validateBarcodeUniqueness() {
+  if (!productForm.codigo_barras.trim()) {
+    barcodeError.value = ''
+    return
+  }
+  try {
+    const params: any = { codigo_barras: productForm.codigo_barras }
+    if (editingId.value) params.exclude_id = editingId.value
+    const res = await axios.get('/products/validate-uniqueness', { params })
+    if (res.data.success && !res.data.valid) {
+      barcodeError.value = res.data.message
+    } else {
+      barcodeError.value = ''
+    }
+  } catch (err) {
+    console.error(err)
   }
 }
 
@@ -339,14 +744,19 @@ function getCategoryName(id: string) {
 function resetForm() {
   editingId.value = null
   showCreateModal.value = false
+  codeError.value = ''
+  barcodeError.value = ''
   Object.assign(productForm, {
     nombre: '',
     codigo: '',
     codigo_barras: '',
     category_id: '',
+    brand_id: '',
     precio_compra: 0,
     precio_venta: 0,
-    estado: 'active'
+    estado: 'active',
+    is_dimensional: false,
+    unidad_medida: 'und'
   })
 }
 
@@ -358,13 +768,27 @@ function editProduct(item: any) {
     codigo: item.codigo,
     codigo_barras: item.codigo_barras,
     category_id: item.category_id || '',
+    brand_id: item.brand_id || '',
     precio_compra: item.precio_compra,
     precio_venta: item.precio_venta,
-    estado: item.estado
+    estado: item.estado,
+    is_dimensional: item.is_dimensional || false,
+    unidad_medida: item.unidad_medida || 'und'
   })
 }
 
 async function handleSubmit() {
+  // Check validation errors before submitting
+  await Promise.all([
+    validateCodeUniqueness(),
+    validateBarcodeUniqueness()
+  ])
+
+  if (codeError.value || barcodeError.value) {
+    alert('Por favor corrige los errores del formulario antes de guardar.')
+    return
+  }
+
   saving.value = true
   try {
     if (editingId.value) {

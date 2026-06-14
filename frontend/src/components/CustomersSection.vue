@@ -107,6 +107,7 @@
               </td>
               <td class="py-3.5 px-4 text-right space-x-2">
                 <button
+                  v-if="authStore.user?.modules?.includes('veterinaria')"
                   @click="openPets(cust)"
                   class="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
                   title="Mascotas"
@@ -231,6 +232,9 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
 import axios from 'axios'
+import { useAuthStore } from '../store/auth'
+
+const authStore = useAuthStore()
 
 const customers = ref<any[]>([])
 const editId = ref<string | null>(null)

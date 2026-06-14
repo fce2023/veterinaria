@@ -7,16 +7,35 @@
         <span>{{ editId ? 'Editar Proveedor' : 'Nuevo Proveedor' }}</span>
       </h3>
       <form @submit.prevent="handleSubmit" class="space-y-4">
+        <div class="flex items-center gap-2 mb-1 px-1">
+          <input 
+            id="genericSupplier"
+            v-model="supplierIsGeneric"
+            type="checkbox"
+            class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <label for="genericSupplier" class="text-[10px] font-bold text-slate-600 uppercase tracking-wider cursor-pointer">
+            Sin RUC / Proveedor Genérico
+          </label>
+        </div>
         <div>
           <label class="block text-xs font-bold text-slate-600 mb-1.5">RUC (11 dígitos)</label>
-          <input
-            v-model="form.ruc"
-            type="text"
-            required
-            maxlength="11"
-            class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all"
-            placeholder="Ej. 20987654321"
-          />
+          <div class="relative">
+            <input
+              v-model="form.ruc"
+              type="text"
+              required
+              maxlength="11"
+              :disabled="supplierIsGeneric"
+              class="block w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all disabled:opacity-60"
+              placeholder="Ej. 20987654321"
+            />
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <i v-if="queryLoading" class="pi pi-spin pi-spinner text-indigo-600"></i>
+              <i v-else class="pi pi-search text-xs"></i>
+            </div>
+          </div>
+          <span v-if="!supplierIsGeneric" class="text-[9px] text-slate-400 font-bold uppercase mt-1 block px-0.5">Se consultará SUNAT al completar 11 dígitos</span>
         </div>
         <div>
           <label class="block text-xs font-bold text-slate-600 mb-1.5">Razón Social</label>
@@ -120,17 +139,60 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, watch } from 'vue'
 import axios from 'axios'
 
 const suppliers = ref<any[]>([])
 const editId = ref<string | null>(null)
+const queryLoading = ref(false)
+const supplierIsGeneric = ref(false)
 
 const form = reactive({
   ruc: '',
   razon_social: '',
   direccion: '',
   telefono: ''
+})
+
+watch(() => form.ruc, async (newVal) => {
+  if (supplierIsGeneric.value) return
+  const cleanRuc = newVal.trim()
+  if (cleanRuc.length === 11 && !editId.value) {
+    queryLoading.value = true
+    try {
+      const res = await axios.get(`/public/ruc/${cleanRuc}`)
+      if (res.data.success && res.data.data) {
+        const d = res.data.data
+        form.razon_social = d.razon_social || d.nombre_o_razon_social || d.razonSocial || d.nombre || ''
+        
+        let address = d.direccion || d.direccion_completa || ''
+        if (!address || address.trim() === '-') {
+          const parts = []
+          if (d.departamento && d.departamento !== '-') parts.push(d.departamento)
+          if (d.provincia && d.provincia !== '-') parts.push(d.provincia)
+          if (d.distrito && d.distrito !== '-') parts.push(d.distrito)
+          address = parts.join(' - ')
+        }
+        form.direccion = address
+      }
+    } catch (err) {
+      console.error('Error querying RUC', err)
+    } finally {
+      queryLoading.value = false
+    }
+  }
+})
+
+watch(() => supplierIsGeneric.value, (newVal) => {
+  if (newVal) {
+    form.ruc = '00000000000'
+    form.razon_social = 'PROVEEDOR VARIOS / GENÉRICO'
+    form.direccion = 'LIMA'
+  } else {
+    form.ruc = ''
+    form.razon_social = ''
+    form.direccion = ''
+  }
 })
 
 onMounted(() => {
@@ -181,6 +243,7 @@ function editSupplier(supplier: any) {
 
 function cancelEdit() {
   editId.value = null
+  supplierIsGeneric.value = false
   Object.assign(form, {
     ruc: '',
     razon_social: '',

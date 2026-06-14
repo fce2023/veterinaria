@@ -44,6 +44,16 @@ func main() {
 		&models.BillingConfig{},
 		&models.ElectronicDocument{},
 		&models.AuditLog{},
+		&models.Plan{},
+		&models.Subscription{},
+		&models.Payment{},
+		&models.CompanyModule{},
+		&models.SaleItemDimension{},
+		&models.CompanySetting{},
+		&models.SaasAuditLog{},
+		&models.CashSession{},
+		&models.CashMovement{},
+		&models.NotaCredito{},
 	)
 	if err != nil {
 		log.Fatalf("Migration failed: %v", err)
@@ -77,6 +87,8 @@ func main() {
 		// Public Routes
 		v1.POST("/auth/login", handlers.Login)
 		v1.POST("/companies/register", handlers.CreateCompany) // Onboarding endpoint
+		v1.GET("/public/ruc/:ruc", handlers.QueryRUC)          // Public RUC search endpoint
+		v1.GET("/public/dni/:dni", handlers.QueryDNI)          // Public DNI search endpoint
 
 		// Protected Routes
 		protected := v1.Group("")
@@ -91,12 +103,22 @@ func main() {
 			saasAdmin.Use(auth.SuperAdminMiddleware())
 			{
 				saasAdmin.GET("/companies", handlers.GetSaaSCompanies)
+				saasAdmin.PUT("/companies/:id", handlers.UpdateSaaSCompany)
 				saasAdmin.PUT("/companies/:id/subscription", handlers.UpdateSaaSCompanySubscription)
+				saasAdmin.DELETE("/companies/:id", handlers.DeleteSaaSCompany)
 				saasAdmin.GET("/stats", handlers.GetSaaSStats)
+				saasAdmin.POST("/plans", handlers.CreatePlan)
+				saasAdmin.GET("/plans", handlers.GetPlans)
+				saasAdmin.POST("/modules/toggle", handlers.ToggleCompanyModule)
+				saasAdmin.POST("/payments/:id/approve", handlers.ApprovePayment)
+				saasAdmin.GET("/settings", handlers.GetSaaSGlobalSettings)
+				saasAdmin.POST("/settings", handlers.SaveSaaSGlobalSettings)
 			}
 
 			// Companies
 			protected.GET("/companies", handlers.GetCompanies)
+			protected.GET("/companies/me", handlers.GetMyCompany)
+			protected.PUT("/companies/me", auth.CompanyAdminMiddleware(), handlers.UpdateMyCompany)
 
 			// Branches
 			protected.GET("/branches", handlers.GetBranches)
@@ -112,6 +134,8 @@ func main() {
 
 			// Products
 			protected.GET("/products", handlers.GetProducts)
+			protected.GET("/products/next-code", handlers.GetNextProductCode)
+			protected.GET("/products/validate-uniqueness", handlers.ValidateProductUniqueness)
 			protected.POST("/products", auth.CompanyAdminMiddleware(), handlers.CreateProduct)
 			protected.PUT("/products/:id", auth.CompanyAdminMiddleware(), handlers.UpdateProduct)
 			protected.DELETE("/products/:id", auth.CompanyAdminMiddleware(), handlers.DeleteProduct)
@@ -140,11 +164,15 @@ func main() {
 			protected.PUT("/customers/:id", handlers.UpdateCustomer)
 			protected.DELETE("/customers/:id", handlers.DeleteCustomer)
 
-			// Pets
-			protected.GET("/pets", handlers.GetPets)
-			protected.POST("/pets", handlers.CreatePet)
-			protected.PUT("/pets/:id", handlers.UpdatePet)
-			protected.DELETE("/pets/:id", handlers.DeletePet)
+			// Pets (Veterinaria)
+			petsGroup := protected.Group("/pets")
+			petsGroup.Use(auth.RequireModule("veterinaria"))
+			{
+				petsGroup.GET("", handlers.GetPets)
+				petsGroup.POST("", handlers.CreatePet)
+				petsGroup.PUT("/:id", handlers.UpdatePet)
+				petsGroup.DELETE("/:id", handlers.DeletePet)
+			}
 
 			// Purchases
 			protected.GET("/purchases", auth.BranchAdminMiddleware(), handlers.GetPurchases)
@@ -155,6 +183,7 @@ func main() {
 			protected.GET("/sales", handlers.GetSales)
 			protected.GET("/sales/:id", handlers.GetSaleDetails)
 			protected.POST("/sales", handlers.CreateSale)
+			protected.POST("/sales/:id/credit-note", handlers.CreateCreditNote)
 
 			// Stocks & Kardex
 			protected.GET("/stocks", handlers.GetStocks)
@@ -166,6 +195,25 @@ func main() {
 			// Billing Configuration
 			protected.GET("/billing/config", auth.CompanyAdminMiddleware(), handlers.GetBillingConfig)
 			protected.POST("/billing/config", auth.CompanyAdminMiddleware(), handlers.SaveBillingConfig)
+			protected.GET("/billing/files/:uuid", handlers.GetBillingFiles)
+			protected.GET("/billing/documents", handlers.GetElectronicDocuments)
+			protected.GET("/billing/documents/stats", handlers.GetDocumentStats)
+			protected.GET("/billing/series", handlers.GetBillingSeries)
+			protected.PATCH("/billing/series/:branchId", auth.CompanyAdminMiddleware(), handlers.UpdateBillingSeries)
+
+			// SaaS Billing & Subscriptions for client tenants
+			protected.POST("/billing/payments", handlers.CreatePaymentRequest)
+
+			// Company Settings
+			protected.GET("/settings", handlers.GetCompanySettings)
+			protected.POST("/settings", handlers.SaveCompanySetting)
+
+			// Cash Register (Caja)
+			protected.GET("/cash/active", handlers.GetActiveCashSession)
+			protected.POST("/cash/open", handlers.OpenCashSession)
+			protected.POST("/cash/close", handlers.CloseCashSession)
+			protected.POST("/cash/movements", handlers.CreateCashMovement)
+			protected.GET("/cash/sessions", handlers.GetCashSessions)
 		}
 	}
 
@@ -217,23 +265,64 @@ func seedDatabase() {
 		log.Println("Seeded SaaS SuperAdmin: saas_admin / saas123")
 	}
 
-	// 3. Default Company, Branch and Admin User
+	// 3. Default Plans
+	var plansCount int64
+	config.DB.Model(&models.Plan{}).Count(&plansCount)
+	var basicPlan models.Plan
+	var premiumPlan models.Plan
+	if plansCount == 0 {
+		basicPlan = models.Plan{
+			Nombre:      "Básico",
+			Precio:      49.00,
+			MaxBranches: 1,
+			MaxUsers:    5,
+			Modulos:     "core",
+		}
+		premiumPlan = models.Plan{
+			Nombre:      "Premium",
+			Precio:      99.00,
+			MaxBranches: 5,
+			MaxUsers:    20,
+			Modulos:     "core,veterinaria,vidrieria,facturacion",
+		}
+		config.DB.Create(&basicPlan)
+		config.DB.Create(&premiumPlan)
+		log.Println("Seeded default plans: Básico, Premium.")
+	} else {
+		config.DB.Where("nombre = ?", "Básico").First(&basicPlan)
+		config.DB.Where("nombre = ?", "Premium").First(&premiumPlan)
+	}
+
+	// 4. Default Company, Branch, Subscription, CompanyModules and Admin User
 	var companiesCount int64
 	config.DB.Model(&models.Company{}).Count(&companiesCount)
 	if companiesCount == 0 {
 		company := models.Company{
-			RUC:                   "20123456789",
-			RazonSocial:           "Clínica Veterinaria San Martín S.A.C.",
-			NombreComercial:       "Veterinaria San Martín",
-			Direccion:             "Av. Universitaria 1234, Lima",
-			Telefono:              "014567890",
-			Email:                 "contacto@vetsanmartin.com",
-			Estado:                "active",
-			PlanType:              "Premium",
-			SubscriptionExpiresAt: time.Now().AddDate(1, 0, 0), // 1 year
-			MaxBranches:           5,
+			RUC:             "20123456789",
+			RazonSocial:     "Clínica Veterinaria San Martín S.A.C.",
+			NombreComercial: "Veterinaria San Martín",
+			Direccion:       "Av. Universitaria 1234, Lima",
+			Telefono:        "014567890",
+			Email:           "contacto@vetsanmartin.com",
+			Estado:          "active",
 		}
 		config.DB.Create(&company)
+
+		// Create active subscription pointing to Premium plan
+		subscription := models.Subscription{
+			CompanyID: company.ID,
+			PlanID:    premiumPlan.ID,
+			Estado:    "ACTIVE",
+			StartsAt:  time.Now(),
+			ExpiresAt: time.Now().AddDate(1, 0, 0), // 1 year
+		}
+		config.DB.Create(&subscription)
+
+		// Activate Company Modules
+		config.DB.Create(&models.CompanyModule{CompanyID: company.ID, ModuleKey: "core", IsActive: true})
+		config.DB.Create(&models.CompanyModule{CompanyID: company.ID, ModuleKey: "veterinaria", IsActive: true})
+		config.DB.Create(&models.CompanyModule{CompanyID: company.ID, ModuleKey: "vidrieria", IsActive: true})
+		config.DB.Create(&models.CompanyModule{CompanyID: company.ID, ModuleKey: "facturacion", IsActive: true})
 
 		branch := models.Branch{
 			CompanyID: company.ID,

@@ -1,5 +1,5 @@
 <template>
-  <div class="billing-section">
+  <div class="billing-section animate-in">
 
     <!-- ===== HEADER ===== -->
     <div class="section-header">
@@ -13,18 +13,63 @@
       </div>
       <div>
         <h2 class="section-title">Facturación Electrónica</h2>
-        <p class="section-sub">Configura la integración con FacturaAPI para emitir comprobantes electrónicos válidos ante SUNAT.</p>
+        <p class="section-sub">Configura la integración con FacturaAPI, define tus series y correlativos, y administra todos tus comprobantes electrónicos ante SUNAT.</p>
       </div>
+    </div>
+
+    <!-- ===== TABS NAVIGATION ===== -->
+    <div class="tabs-nav">
+      <button 
+        type="button"
+        @click="activeTab = 'config'" 
+        :class="['tab-nav-btn', activeTab === 'config' ? 'tab-nav-btn--active' : '']"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="tab-icon">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Configuración de API
+      </button>
+      <button 
+        type="button"
+        @click="activeTab = 'documents'" 
+        :class="['tab-nav-btn', activeTab === 'documents' ? 'tab-nav-btn--active' : '']"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="tab-icon">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        Comprobantes Emitidos
+      </button>
+      <button 
+        type="button"
+        @click="activeTab = 'series'" 
+        :class="['tab-nav-btn', activeTab === 'series' ? 'tab-nav-btn--active' : '']"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="tab-icon">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="9" y1="3" x2="9" y2="21"/>
+          <line x1="15" y1="3" x2="15" y2="21"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="3" y1="15" x2="21" y2="15"/>
+        </svg>
+        Series y Correlativos
+      </button>
     </div>
 
     <!-- ===== LOADING STATE ===== -->
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>Cargando configuración...</p>
+      <p>Cargando datos del módulo...</p>
     </div>
 
     <div v-else class="content-wrapper">
-      <div class="tab-panel animate-in">
+      
+      <!-- ================= TAB 1: CONFIG ================= -->
+      <div v-if="activeTab === 'config'" class="tab-panel animate-in">
         <!-- Sync Logs Console -->
         <transition name="fade-slide">
           <div v-if="saveLogs.length > 0 || apiError" class="sync-console" :class="apiError ? 'sync-console--error' : 'sync-console--info'">
@@ -71,6 +116,7 @@
                 type="text"
                 placeholder="Ej. MODDATOS"
                 class="field-input field-input--mono"
+                required
               />
               <p class="field-hint">Usuario secundario SOL con permisos de emisión</p>
             </div>
@@ -82,6 +128,7 @@
                   :type="showSolPass ? 'text' : 'password'"
                   placeholder="Clave SOL..."
                   class="field-input field-input--mono"
+                  required
                 />
                 <button type="button" @click="showSolPass = !showSolPass" class="input-eye-btn">
                   <svg v-if="!showSolPass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -208,7 +255,7 @@
             </div>
           </div>
 
-          <!-- Estado -->
+          <!-- Estado del modulo -->
           <div class="field" style="margin-top:16px;">
             <label class="field-label">Estado del Servicio de Facturación</label>
             <div class="toggle-row">
@@ -265,6 +312,305 @@
           </div>
         </form>
       </div>
+
+      <!-- ================= TAB 2: DOCUMENTS ================= -->
+      <div v-if="activeTab === 'documents'" class="tab-panel animate-in">
+        
+        <!-- Stats Cards -->
+        <div class="doc-stats-grid">
+          <div class="doc-stat-card doc-stat-card--total">
+            <div class="doc-stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div>
+              <p class="doc-stat-label">Total Comprobantes</p>
+              <p class="doc-stat-value">{{ docStats.grand_total || 0 }}</p>
+            </div>
+          </div>
+          <div class="doc-stat-card doc-stat-card--factura">
+            <div class="doc-stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            </div>
+            <div>
+              <p class="doc-stat-label">Facturas</p>
+              <p class="doc-stat-value">{{ getStatTotal('01') }}</p>
+            </div>
+          </div>
+          <div class="doc-stat-card doc-stat-card--boleta">
+            <div class="doc-stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            </div>
+            <div>
+              <p class="doc-stat-label">Boletas</p>
+              <p class="doc-stat-value">{{ getStatTotal('03') }}</p>
+            </div>
+          </div>
+          <div class="doc-stat-card doc-stat-card--nc">
+            <div class="doc-stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            </div>
+            <div>
+              <p class="doc-stat-label">Notas de Crédito</p>
+              <p class="doc-stat-value">{{ getStatTotal('07') }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filters Controls -->
+        <div class="filter-controls-wrap">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              placeholder="Buscar por serie o número..." 
+              @input="loadDocuments" 
+              class="search-input"
+            />
+          </div>
+
+          <div class="select-filter-group">
+            <select v-model="filterType" @change="loadDocuments" class="filter-select">
+              <option value="">Todos los Tipos</option>
+              <option value="01">Facturas</option>
+              <option value="03">Boletas</option>
+              <option value="07">Notas de Crédito</option>
+            </select>
+
+            <select v-model="filterEstado" @change="loadDocuments" class="filter-select">
+              <option value="">Todos los Estados</option>
+              <option value="accepted">Aceptados (SUNAT)</option>
+              <option value="pending">Pendientes</option>
+              <option value="rejected">Rechazados</option>
+              <option value="voided">Anulados</option>
+            </select>
+          </div>
+
+          <div class="date-filter-group">
+            <div class="date-field">
+              <label class="date-label">Desde</label>
+              <input v-model="filterFechaDesde" type="date" class="filter-select" @change="loadDocuments" />
+            </div>
+            <div class="date-field">
+              <label class="date-label">Hasta</label>
+              <input v-model="filterFechaHasta" type="date" class="filter-select" @change="loadDocuments" />
+            </div>
+            <button v-if="filterFechaDesde || filterFechaHasta" type="button" @click="clearDateFilter" class="clear-date-btn">✕ Limpiar fechas</button>
+          </div>
+        </div>
+
+        <!-- Results Count -->
+        <div v-if="!loadingDocs && documents.length > 0" class="results-count">
+          <span>Mostrando <strong>{{ documents.length }}</strong> comprobante(s)</span>
+        </div>
+
+        <!-- Documents Table -->
+        <div v-if="loadingDocs" class="table-loading">
+          <div class="spinner"></div>
+          <p>Cargando comprobantes...</p>
+        </div>
+
+        <div v-else-if="documents.length === 0" class="empty-table-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <p class="empty-title">No se encontraron comprobantes</p>
+          <p class="empty-sub">Aún no se han emitido comprobantes electrónicos que coincidan con los filtros seleccionados.</p>
+        </div>
+
+        <div v-else class="table-responsive">
+          <table class="billing-table">
+            <thead>
+              <tr>
+                <th>Fecha Emisión</th>
+                <th>Comprobante</th>
+                <th>Cliente</th>
+                <th>Monto Total</th>
+                <th>Estado SUNAT</th>
+                <th class="text-right">Descargas (FacturaAPI)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="doc in documents" :key="doc.id">
+                <td class="font-mono text-xs">{{ formatDate(doc.created_at) }}</td>
+                <td>
+                  <div class="doc-ident-wrap">
+                    <span class="doc-type-pill">{{ formatDocType(doc.tipo_documento) }}</span>
+                    <strong class="font-mono text-slate-800">{{ doc.serie }}-{{ doc.numero }}</strong>
+                  </div>
+                </td>
+                <td>
+                  <div v-if="doc.sale && doc.sale.customer" class="cust-info">
+                    <p class="cust-name">{{ doc.sale.customer.nombre }}</p>
+                    <p class="cust-doc text-slate-400 font-mono text-[10px]">{{ doc.sale.customer.tipo_documento }}: {{ doc.sale.customer.numero_documento }}</p>
+                  </div>
+                  <span v-else class="text-slate-400">-</span>
+                </td>
+                <td>
+                  <strong v-if="doc.sale" class="text-slate-800 font-bold">S/. {{ doc.sale.total.toFixed(2) }}</strong>
+                  <span v-else class="text-slate-400">-</span>
+                </td>
+                <td>
+                  <span :class="['badge', 'badge--' + doc.estado]">
+                    <span class="badge-dot"></span>
+                    {{ doc.estado.toUpperCase() }}
+                  </span>
+                </td>
+                <td class="text-right">
+                  <div class="action-btn-group">
+                    <button 
+                      type="button"
+                      @click="downloadFile(doc.document_uuid, 'pdf')" 
+                      class="action-btn action-btn--pdf" 
+                      title="Descargar PDF Representación Impresa"
+                    >
+                      PDF
+                    </button>
+                    <button 
+                      type="button"
+                      @click="downloadFile(doc.document_uuid, 'xml')" 
+                      class="action-btn action-btn--xml" 
+                      title="Descargar XML firmado por SUNAT"
+                    >
+                      XML
+                    </button>
+                    <button 
+                      type="button"
+                      @click="downloadFile(doc.document_uuid, 'cdr')" 
+                      class="action-btn action-btn--cdr" 
+                      title="Descargar CDR (Constancia de Recepción)"
+                      :disabled="doc.estado !== 'accepted'"
+                    >
+                      CDR
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ================= TAB 3: SERIES & CORRELATIVOS ================= -->
+      <div v-if="activeTab === 'series'" class="tab-panel animate-in">
+        
+        <div v-if="loadingSeries" class="loading-state">
+          <div class="spinner"></div>
+          <p>Cargando configuración de sucursales...</p>
+        </div>
+
+        <div v-else>
+          <div class="info-box info-box--neutral">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8"/><line x1="12" y1="12" x2="12" y2="16"/></svg>
+            Las series y correlativos se configuran por sucursal. Configura las series oficiales autorizadas por SUNAT. El número correlativo inicial se usará como punto de partida si no existen comprobantes emitidos previamente con esa serie.
+          </div>
+
+          <transition name="fade-slide">
+            <div v-if="branchSuccessMsg" class="success-banner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:16px;height:16px;"><polyline points="20 6 9 17 4 12"/></svg>
+              {{ branchSuccessMsg }}
+            </div>
+            <div v-else-if="branchErrorMsg" class="error-banner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              {{ branchErrorMsg }}
+            </div>
+          </transition>
+
+          <!-- All Branches Series Config -->
+          <div v-for="branch in allBranches" :key="branch.id" class="branch-series-block">
+            <div class="branch-series-header">
+              <div class="branch-series-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                <span>{{ branch.nombre }}</span>
+                <span v-if="branch.is_main" class="main-branch-badge">Principal</span>
+              </div>
+              <button 
+                type="button"
+                @click="saveSingleBranch(branch)" 
+                :disabled="savingBranchId === branch.id"
+                class="btn-primary btn-primary--sm"
+              >
+                <div v-if="savingBranchId === branch.id" class="btn-spinner"></div>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:13px;height:13px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                {{ savingBranchId === branch.id ? 'Guardando...' : 'Guardar' }}
+              </button>
+            </div>
+
+            <div class="series-block-grid">
+              <!-- FACTURAS -->
+              <div class="series-card">
+                <div class="series-card-header">
+                  <span class="series-badge">FACTURAS</span>
+                </div>
+                <div class="series-card-body">
+                  <div class="field">
+                    <label class="field-label">Serie de Factura</label>
+                    <input 
+                      v-model="branch.serie_factura" 
+                      type="text" 
+                      placeholder="Ej. F001" 
+                      maxlength="4" 
+                      class="field-input field-input--mono" 
+                    />
+                    <p class="field-hint">4 chars — F001 (prod) / FL01 (beta)</p>
+                  </div>
+                  <div class="field" style="margin-top:12px;">
+                    <label class="field-label">Siguiente Correlativo</label>
+                    <input 
+                      v-model.number="branch.correlativo_factura" 
+                      type="number" 
+                      placeholder="Ej. 1" 
+                      min="1" 
+                      class="field-input field-input--mono" 
+                    />
+                    <p class="field-hint">Autoincrementa con cada venta</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- BOLETAS -->
+              <div class="series-card">
+                <div class="series-card-header">
+                  <span class="series-badge series-badge--boleta">BOLETAS</span>
+                </div>
+                <div class="series-card-body">
+                  <div class="field">
+                    <label class="field-label">Serie de Boleta</label>
+                    <input 
+                      v-model="branch.serie_boleta" 
+                      type="text" 
+                      placeholder="Ej. B001" 
+                      maxlength="4" 
+                      class="field-input field-input--mono" 
+                    />
+                    <p class="field-hint">4 chars — B001 (prod) / BL01 (beta)</p>
+                  </div>
+                  <div class="field" style="margin-top:12px;">
+                    <label class="field-label">Siguiente Correlativo</label>
+                    <input 
+                      v-model.number="branch.correlativo_boleta" 
+                      type="number" 
+                      placeholder="Ej. 1" 
+                      min="1" 
+                      class="field-input field-input--mono" 
+                    />
+                    <p class="field-hint">Autoincrementa con cada venta</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="allBranches.length === 0" class="empty-table-state">
+            <p class="empty-title">No hay sucursales configuradas</p>
+          </div>
+        </div>
+
+      </div>
+
     </div>
 
     <!-- ===== HELP CARD ===== -->
@@ -291,7 +637,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
+import { useAuthStore } from '../store/auth'
 import axios from 'axios'
+
+const authStore = useAuthStore()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -300,6 +649,9 @@ const showClientSecret = ref(false)
 const showCertPass = ref(false)
 const certInput = ref<HTMLInputElement | null>(null)
 
+const activeTab = ref('config') // config, documents, series
+
+// API Config state
 const config = reactive({
   api_url: '',
   api_key: '',
@@ -318,13 +670,34 @@ const config = reactive({
 const saveLogs = ref<string[]>([])
 const apiError = ref<string>('')
 
-const clearLogs = () => {
-  saveLogs.value = []
-  apiError.value = ''
-}
+// Documents state
+const documents = ref<any[]>([])
+const loadingDocs = ref(false)
+const searchQuery = ref('')
+const filterType = ref('')
+const filterEstado = ref('')
+const filterFechaDesde = ref('')
+const filterFechaHasta = ref('')
+
+// Document stats
+const docStats = ref<any>({ grand_total: 0, totals: [], data: [] })
+
+// Series/Branch state
+const activeBranch = ref<any>(null)
+const allBranches = ref<any[]>([])
+const loadingSeries = ref(false)
+const savingBranch = ref(false)
+const savingBranchId = ref<string | null>(null)
+const branchSuccessMsg = ref('')
+const branchErrorMsg = ref('')
 
 onMounted(async () => {
-  await loadConfig()
+  await Promise.all([
+    loadConfig(),
+    loadDocuments(),
+    loadDocumentStats(),
+    loadAllBranches()
+  ])
 })
 
 const triggerCertInput = () => certInput.value?.click()
@@ -356,7 +729,8 @@ async function loadConfig() {
 
 async function saveConfig() {
   saving.value = true
-  clearLogs()
+  saveLogs.value = []
+  apiError.value = ''
   try {
     const res = await axios.post('/billing/config', config)
     if (res.data.success) {
@@ -367,16 +741,147 @@ async function saveConfig() {
       await loadConfig()
     }
   } catch (err: any) {
-    apiError.value = err.response?.data?.error || 'Error de red o de servidor al intentar guardar.'
-    saveLogs.value = ['Error al conectar con el servidor.']
+    const data = err.response?.data
+    apiError.value = data?.error || data?.api_error || 'Error de red o de servidor al intentar guardar.'
+    if (data?.logs && data.logs.length > 0) {
+      saveLogs.value = data.logs
+    } else {
+      saveLogs.value = ['Error al conectar con el servidor.']
+    }
   } finally {
     saving.value = false
   }
 }
+
+// Fetch Electronic Documents
+async function loadDocuments() {
+  loadingDocs.value = true
+  try {
+    const params: any = {}
+    if (filterType.value) params.tipo_documento = filterType.value
+    if (filterEstado.value) params.estado = filterEstado.value
+    if (searchQuery.value) params.search = searchQuery.value
+    if (filterFechaDesde.value) params.fecha_desde = filterFechaDesde.value
+    if (filterFechaHasta.value) params.fecha_hasta = filterFechaHasta.value
+
+    const res = await axios.get('/billing/documents', { params })
+    if (res.data.success) {
+      documents.value = res.data.data
+    }
+  } catch (err) {
+    console.error('Error loading electronic documents', err)
+  } finally {
+    loadingDocs.value = false
+  }
+}
+
+// Fetch Document Stats
+async function loadDocumentStats() {
+  try {
+    const res = await axios.get('/billing/documents/stats')
+    if (res.data.success) {
+      docStats.value = res.data
+    }
+  } catch (err) {
+    console.error('Error loading document stats', err)
+  }
+}
+
+function getStatTotal(tipo: string): number {
+  if (!docStats.value.totals) return 0
+  const found = docStats.value.totals.find((t: any) => t.tipo_documento === tipo)
+  return found ? found.total : 0
+}
+
+// Fetch All Branches with series config
+async function loadAllBranches() {
+  loadingSeries.value = true
+  try {
+    const res = await axios.get('/billing/series')
+    if (res.data.success && res.data.data) {
+      allBranches.value = res.data.data
+      // Also set activeBranch for legacy compat
+      const activeBranchId = authStore.user?.branch_id
+      activeBranch.value = res.data.data.find((b: any) => b.id === activeBranchId) || res.data.data[0]
+    }
+  } catch (err) {
+    console.error('Error loading branch series', err)
+  } finally {
+    loadingSeries.value = false
+  }
+}
+
+// Save single branch series via dedicated endpoint
+async function saveSingleBranch(branch: any) {
+  savingBranchId.value = branch.id
+  branchSuccessMsg.value = ''
+  branchErrorMsg.value = ''
+  try {
+    const res = await axios.patch(`/billing/series/${branch.id}`, {
+      serie_factura: branch.serie_factura,
+      serie_boleta: branch.serie_boleta,
+      correlativo_factura: branch.correlativo_factura,
+      correlativo_boleta: branch.correlativo_boleta,
+    })
+    if (res.data.success) {
+      branchSuccessMsg.value = `Series de "${branch.nombre}" guardadas correctamente.`
+      // Update local data
+      const idx = allBranches.value.findIndex((b: any) => b.id === branch.id)
+      if (idx !== -1) allBranches.value[idx] = res.data.data
+      setTimeout(() => { branchSuccessMsg.value = '' }, 4000)
+    }
+  } catch (err: any) {
+    branchErrorMsg.value = err.response?.data?.error || 'Error al guardar series.'
+  } finally {
+    savingBranchId.value = null
+  }
+}
+
+function clearDateFilter() {
+  filterFechaDesde.value = ''
+  filterFechaHasta.value = ''
+  loadDocuments()
+}
+
+// Helper: Download files from FacturaAPI
+async function downloadFile(uuid: string, type: 'pdf' | 'xml' | 'cdr') {
+  try {
+    const res = await axios.get(`/billing/files/${uuid}`)
+    if (res.data.success && res.data.data && res.data.data.files && res.data.data.files[type]) {
+      window.open(res.data.data.files[type], '_blank')
+    } else if (res.data.files && res.data.files[type]) {
+      window.open(res.data.files[type], '_blank')
+    } else {
+      alert('El comprobante no tiene este archivo disponible en el microservicio.')
+    }
+  } catch (err: any) {
+    alert('No se pudo recuperar el archivo: ' + (err.response?.data?.error || 'el comprobante está en modo pruebas y no tiene archivos guardados en el servidor.'))
+  }
+}
+
+function formatDocType(type: string): string {
+  switch (type) {
+    case '01': return 'Factura'
+    case '03': return 'Boleta'
+    case '07': return 'Nota Crédito'
+    case '08': return 'Nota Débito'
+    default: return 'Doc'
+  }
+}
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('es-PE', { timeZone: 'America/Lima' })
+}
+
+const clearLogs = () => {
+  saveLogs.value = []
+  apiError.value = ''
+}
 </script>
 
 <style scoped>
-/* Copied exact scoped styles from original BillingSection.vue for design consistency */
 .billing-section {
   max-width: 960px;
   margin: 0 auto;
@@ -422,6 +927,46 @@ async function saveConfig() {
   margin: 0;
   line-height: 1.5;
 }
+
+/* Tabs Navigation */
+.tabs-nav {
+  display: flex;
+  gap: 8px;
+  background: #f1f5f9;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+.tab-nav-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.25s ease;
+}
+.tab-nav-btn:hover {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.4);
+}
+.tab-nav-btn--active {
+  background: white;
+  color: #6366f1;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+}
+.tab-icon {
+  width: 15px;
+  height: 15px;
+}
+
 .loading-state {
   display: flex;
   flex-direction: column;
@@ -445,6 +990,7 @@ async function saveConfig() {
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 .tab-panel {
   padding: 28px 28px 32px;
@@ -456,6 +1002,446 @@ async function saveConfig() {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Filters for Vouchers List */
+.filter-controls-wrap {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.search-box {
+  flex: 1;
+  min-width: 260px;
+  position: relative;
+}
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: #94a3b8;
+}
+.search-input {
+  width: 100%;
+  padding: 9px 12px 9px 38px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 9px;
+  font-size: 13px;
+  outline: none;
+  background: #f8fafc;
+  box-sizing: border-box;
+  transition: all 0.2s;
+}
+.search-input:focus {
+  border-color: #6366f1;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+.select-filter-group {
+  display: flex;
+  gap: 10px;
+}
+.filter-select {
+  padding: 9px 14px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #475569;
+  background: #f8fafc;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.filter-select:focus {
+  border-color: #6366f1;
+  background: white;
+}
+
+/* Date filter group */
+.date-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.date-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.clear-date-btn {
+  padding: 7px 12px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  background: white;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-top: 13px;
+}
+.clear-date-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+/* Results count */
+.results-count {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.results-count strong {
+  color: #6366f1;
+}
+
+/* Document Stats Grid */
+.doc-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (max-width: 768px) {
+  .doc-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.doc-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid #e2e8f0;
+  background: white;
+  transition: box-shadow 0.2s;
+}
+.doc-stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.doc-stat-card--total { border-color: #c7d2fe; background: #f0f4ff; }
+.doc-stat-card--factura { border-color: #a7f3d0; background: #f0fdf4; }
+.doc-stat-card--boleta { border-color: #bae6fd; background: #f0f9ff; }
+.doc-stat-card--nc { border-color: #fde68a; background: #fffbeb; }
+.doc-stat-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.doc-stat-card--total .doc-stat-icon { background: #818cf8; color: white; }
+.doc-stat-card--factura .doc-stat-icon { background: #34d399; color: white; }
+.doc-stat-card--boleta .doc-stat-icon { background: #38bdf8; color: white; }
+.doc-stat-card--nc .doc-stat-icon { background: #f59e0b; color: white; }
+.doc-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.doc-stat-value {
+  font-size: 22px;
+  font-weight: 900;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+/* Branch series block */
+.branch-series-block {
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.branch-series-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: #f8fafc;
+  border-bottom: 1.5px solid #e2e8f0;
+}
+.branch-series-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.main-branch-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #ede9fe;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.btn-primary--sm {
+  padding: 7px 14px !important;
+  font-size: 11px !important;
+  gap: 5px !important;
+}
+.branch-series-block .series-block-grid {
+  padding: 16px;
+  background: white;
+}
+
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  border: 1.5px solid #f1f5f9;
+  border-radius: 12px;
+}
+.billing-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.billing-table th {
+  background: #f8fafc;
+  padding: 12px 16px;
+  font-weight: 700;
+  color: #475569;
+  border-bottom: 1.5px solid #f1f5f9;
+}
+.billing-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+.billing-table tr:last-child td {
+  border-bottom: none;
+}
+.billing-table tr:hover td {
+  background: #fafafa;
+}
+.table-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  color: #94a3b8;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.doc-ident-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.doc-type-pill {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #6366f1;
+  background: #f5f3ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  align-self: flex-start;
+  letter-spacing: 0.2px;
+}
+.cust-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cust-name {
+  font-weight: 600;
+  color: #334155;
+  margin: 0;
+}
+.cust-doc {
+  margin: 0;
+}
+
+/* Badge states */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge--accepted { background: #f0fdf4; color: #16a34a; }
+.badge--rejected { background: #fef2f2; color: #ef4444; }
+.badge--pending { background: #fffbeb; color: #d97706; }
+.badge--voided { background: #f8fafc; color: #64748b; }
+
+/* Download Actions Group */
+.action-btn-group {
+  display: inline-flex;
+  gap: 4px;
+}
+.action-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.2s;
+  background: white;
+}
+.action-btn--pdf {
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+.action-btn--pdf:hover {
+  background: #fef2f2;
+}
+.action-btn--xml {
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+.action-btn--xml:hover {
+  background: #eff6ff;
+}
+.action-btn--cdr {
+  border-color: #cbd5e1;
+  color: #475569;
+}
+.action-btn--cdr:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+/* Series Cards configuration */
+.series-block-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-top: 18px;
+}
+@media (max-width: 768px) {
+  .series-block-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.series-card {
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f8fafc;
+  transition: border-color 0.25s;
+}
+.series-card:hover {
+  border-color: #cbd5e1;
+}
+.series-card-header {
+  padding: 12px 16px;
+  border-bottom: 1.5px solid #e2e8f0;
+  background: white;
+  display: flex;
+}
+.series-badge {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  background: #eef2ff;
+  color: #4f46e5;
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+.series-badge--boleta {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.series-card-body {
+  padding: 18px 16px;
+}
+
+/* Banners success & error */
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #15803d;
+  margin-bottom: 16px;
+}
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #b91c1c;
+  margin-bottom: 16px;
+}
+.info-box--neutral {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
+  margin-bottom: 16px;
+}
+
+/* Empty State */
+.empty-table-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 60px 20px;
+  color: #94a3b8;
+}
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  stroke: #cbd5e1;
+  margin-bottom: 12px;
+}
+.empty-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  margin: 0 0 4px;
+}
+.empty-sub {
+  font-size: 12px;
+  max-width: 380px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Config forms styling */
 .biz-form { display: flex; flex-direction: column; }
 .form-section-label {
   font-size: 10.5px;
@@ -544,7 +1530,7 @@ async function saveConfig() {
   width: 36px;
   height: 36px;
   background: #dcfce7;
-  border-radius: 9px;
+  border-radius: 99px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -825,4 +1811,5 @@ details[open] .chevron-icon { transform: rotate(180deg); }
 .fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateY(-8px); }
 .fade-slide-leave-to   { opacity: 0; transform: translateY(-4px); }
+.hidden-file { display: none; }
 </style>

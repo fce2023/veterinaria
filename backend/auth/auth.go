@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"veterinaria/backend/config"
+	"veterinaria/backend/models"
 )
 
 var jwtSecret []byte
@@ -36,6 +39,7 @@ type Claims struct {
 }
 
 // HashPassword hashes a raw password using bcrypt
+// (omitted unchanged lines for safety but kept here since we overwrite the whole file or parts)
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	return string(bytes), err
@@ -155,6 +159,41 @@ func BranchAdminMiddleware() gin.HandlerFunc {
 		role := roleType.(string)
 		if role != "SUPER_ADMIN" && role != "COMPANY_ADMIN" && role != "BRANCH_ADMIN" {
 			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Acceso denegado: Se requieren privilegios de Encargado de Sucursal o superior"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireModule validates that the company has a specific module enabled
+func RequireModule(moduleKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		companyIDStr, exists := c.Get("companyID")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Acceso no autorizado"})
+			c.Abort()
+			return
+		}
+		companyID, err := uuid.Parse(fmt.Sprintf("%v", companyIDStr))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "ID de empresa inválido"})
+			c.Abort()
+			return
+		}
+
+		var active bool
+		err = config.DB.Model(&models.CompanyModule{}).
+			Select("is_active").
+			Where("company_id = ? AND module_key = ? AND is_active = true", companyID, moduleKey).
+			Scan(&active).Error
+
+		if err != nil || !active {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"error":   "Acceso Restringido",
+				"message": "Tu suscripción no incluye acceso al módulo: " + moduleKey,
+			})
 			c.Abort()
 			return
 		}
