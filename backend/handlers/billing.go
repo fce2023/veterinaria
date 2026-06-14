@@ -57,16 +57,17 @@ func SaveBillingConfig(c *gin.Context) {
 	}
 
 	var input struct {
-		ApiURL            string `json:"api_url"`
-		ApiKey            string `json:"api_key"`
-		TenantUUID        string `json:"tenant_uuid"`
-		Modo              string `json:"modo"`
-		Estado            string `json:"estado"`
-		SolUser           string `json:"sol_user"`
-		SolPass           string `json:"sol_pass"`
-		CertificadoBase64 string `json:"certificado_base64"`
-		ClientID          string `json:"client_id"`
-		ClientSecret      string `json:"client_secret"`
+		ApiURL              string `json:"api_url"`
+		ApiKey              string `json:"api_key"`
+		TenantUUID          string `json:"tenant_uuid"`
+		Modo                string `json:"modo"`
+		Estado              string `json:"estado"`
+		SolUser             string `json:"sol_user"`
+		SolPass             string `json:"sol_pass"`
+		CertificadoBase64   string `json:"certificado_base64"`
+		CertificadoPassword string `json:"certificado_password"`
+		ClientID            string `json:"client_id"`
+		ClientSecret        string `json:"client_secret"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -89,6 +90,9 @@ func SaveBillingConfig(c *gin.Context) {
 	billingConfig.ClientSecret = input.ClientSecret
 	if input.CertificadoBase64 != "" {
 		billingConfig.CertificadoBase64 = input.CertificadoBase64
+	}
+	if input.CertificadoPassword != "" {
+		billingConfig.CertificadoPassword = input.CertificadoPassword
 	}
 
 	// 1. Fetch Company details
@@ -247,9 +251,16 @@ func SaveBillingConfig(c *gin.Context) {
 			// Step C: POST Certificate
 			if input.CertificadoBase64 != "" {
 				logs = append(logs, "Subiendo certificado digital .p12...")
+				certPassword := input.CertificadoPassword
+				if certPassword == "" {
+					certPassword = billingConfig.CertificadoPassword
+				}
+				if certPassword == "" {
+					certPassword = input.SolPass // fallback to SOL password
+				}
 				certPayload := map[string]string{
 					"certificate_base64": input.CertificadoBase64,
-					"password":           input.SolPass,
+					"password":           certPassword,
 					"extension":          "p12",
 				}
 				jsonCert, _ := json.Marshal(certPayload)
