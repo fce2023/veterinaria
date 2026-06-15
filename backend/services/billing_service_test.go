@@ -201,6 +201,36 @@ func TestEmitSale(t *testing.T) {
 					Direccion:       "Calle Lima 789",
 				},
 			},
+			{
+				name: "Real customer with lowercase and padded type/number",
+				cust: models.Customer{
+					TipoDocumento:   "  ruc  ",
+					NumeroDocumento: " 20123456789 ",
+					Nombre:          "Empresa S.A.",
+					Direccion:       "Calle Lima 789",
+				},
+				expected: BillingCustomer{
+					TipoDocumento:   "6",
+					NumeroDocumento: "20123456789",
+					RazonSocial:     "Empresa S.A.",
+					Direccion:       "Calle Lima 789",
+				},
+			},
+			{
+				name: "Real customer with mixed case DNI",
+				cust: models.Customer{
+					TipoDocumento:   " Dni ",
+					NumeroDocumento: "12345678",
+					Nombre:          "Juan Perez",
+					Direccion:       "Av. Larco 123",
+				},
+				expected: BillingCustomer{
+					TipoDocumento:   "1",
+					NumeroDocumento: "12345678",
+					RazonSocial:     "Juan Perez",
+					Direccion:       "Av. Larco 123",
+				},
+			},
 		}
 
 		for _, tt := range tests {

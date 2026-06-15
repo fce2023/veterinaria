@@ -1,6 +1,7 @@
 package services
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,11 +19,16 @@ import (
 	"veterinaria/backend/models"
 )
 
+var (
+	reNote = regexp.MustCompile(`(?s)<(?:[\w-]*:)?Note[^>]*>(.*?)</(?:[\w-]*:)?Note>`)
+	reDesc = regexp.MustCompile(`(?s)<(?:[\w-]*:)?Description[^>]*>(.*?)</(?:[\w-]*:)?Description>`)
+)
+
 // FacturaAPI Payload Structures
 type BillingHeader struct {
 	TipoDocumento string `json:"tipo_documento"`
 	Serie         string `json:"serie"`
-	Numero        int    `json:"numero"`
+	Numero        int    `json:"numero,omitempty"`
 	FechaEmision  string `json:"fecha_emision"`
 }
 
@@ -33,8 +42,17 @@ type BillingCustomer struct {
 type BillingItem struct {
 	Descripcion    string  `json:"descripcion"`
 	Cantidad       float64 `json:"cantidad"`
-	PrecioUnitario float64 `json:"precio_unitario"`
-	Subtotal       float64 `json:"subtotal"`
+	Unidad         string  `json:"unidad"`          // Catálogo 03
+	PrecioUnitario float64 `json:"precio_unitario"` // Con IGV
+	Subtotal       float64 `json:"subtotal"`        // Sin IGV
+	TipoAfectacion string  `json:"tipo_afectacion"` // Catálogo 07
+}
+
+type BillingDetraccion struct {
+	CodigoBienServicio string  `json:"codigo_bien_servicio"`
+	CodigoMedioPago    string  `json:"codigo_medio_pago"`
+	Porcentaje         float64 `json:"porcentaje"`
+	Monto              float64 `json:"monto"`
 }
 
 type BillingTotals struct {
@@ -43,19 +61,22 @@ type BillingTotals struct {
 }
 
 type EmitPayload struct {
-	EmpresaID string          `json:"empresa_id"`
-	Async     bool            `json:"async"`
-	Modo      string          `json:"modo"`
-	Header    BillingHeader   `json:"header"`
-	Cliente   BillingCustomer `json:"cliente"`
-	Items     []BillingItem   `json:"items"`
-	Totales   BillingTotals   `json:"totales"`
+	EmpresaID  string             `json:"empresa_id"`
+	Async      bool               `json:"async"`
+	Modo       string             `json:"modo"`
+	Header     BillingHeader      `json:"header"`
+	Cliente    BillingCustomer    `json:"cliente"`
+	Items      []BillingItem      `json:"items"`
+	Totales    BillingTotals      `json:"totales"`
+	Detraccion *BillingDetraccion `json:"detraccion,omitempty"`
 }
 
 type EmitResponse struct {
-	Message     string `json:"message"`
-	DocumentoID string `json:"documento_id"`
-	Status      string `json:"status"`
+	Message          string `json:"message"`
+	DocumentoID      string `json:"documento_id"`
+	Status           string `json:"status"`
+	SunatDescription string `json:"sunat_description,omitempty"`
+	SunatNotes       string `json:"sunat_notes,omitempty"`
 	// Synchronous response fields
 	SunatResponse string `json:"sunat_response,omitempty"`
 	Files         struct {
@@ -106,13 +127,11 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 		}
 	}
 
-	// Sanitize URL: Remove trailing slash or "/api/v1" suffix to prevent duplicate segments
+	// Sanitize URL
 	if apiURL != "" {
-		// Remove trailing slash
 		if apiURL[len(apiURL)-1] == '/' {
 			apiURL = apiURL[:len(apiURL)-1]
 		}
-		// Remove trailing "/api/v1"
 		suffix := "/api/v1"
 		if len(apiURL) >= len(suffix) && apiURL[len(apiURL)-len(suffix):] == suffix {
 			apiURL = apiURL[:len(apiURL)-len(suffix)]
@@ -124,68 +143,90 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	}
 
 	// 2. Prepare Payload
-	// Map Customer
 	var customer models.Customer
-	config.DB.First(&customer, sale.CustomerID)
-
-	// Determine Serie and Number (This should ideally come from a counter/branch config)
-	// For MVP, we'll try to get it from Branch or use defaults
-	var branch models.Branch
-	config.DB.First(&branch, sale.BranchID)
-
-	serie := branch.SerieFactura
-	if serie == "" {
-		serie = "F001" // Default
+	if err := config.DB.First(&customer, sale.CustomerID).Error; err != nil {
+		return nil, fmt.Errorf("failed to retrieve billing customer: %w", err)
 	}
 
-	// In a real scenario, we should have a document counter. 
-	// For now, we'll use a simplified approach or let the user provide it.
-	// Since Sale model doesn't have a number yet, we'll use a placeholder or 
-	// add a field to Sale later.
+	var billingItems []BillingItem
+	hasServices := false
+	for _, item := range items {
+		var product models.Product
+		if err := config.DB.Select("nombre, unidad_medida").First(&product, item.ProductID).Error; err != nil {
+			return nil, fmt.Errorf("failed to retrieve product %s: %w", item.ProductID, err)
+		}
 
+		if product.UnidadMedida == "servicio" {
+			hasServices = true
+		}
+
+		billingItems = append(billingItems, BillingItem{
+			Descripcion:    product.Nombre,
+			Cantidad:       item.Cantidad,
+			Unidad:         item.UnidadSUNAT,
+			PrecioUnitario: item.PrecioUnitario,
+			Subtotal:       item.Subtotal,
+			TipoAfectacion: item.TipoAfectacion,
+		})
+	}
+
+	num, _ := strconv.Atoi(sale.Numero)
 	payload := EmitPayload{
 		EmpresaID: billingConfig.TenantUUID,
-		Async:     true, // Default async for production-ready flow
+		Async:     true,
 		Modo:      billingConfig.Modo,
 		Header: BillingHeader{
-			TipoDocumento: "01", // Default to Factura for now, should be dynamic
-			Serie:         serie,
-			Numero:        1, // Placeholder: Needs a real counter
+			TipoDocumento: sale.TipoDocumento,
+			Serie:         sale.Serie,
+			Numero:        num,
 			FechaEmision:  sale.CreatedAt.Format("2006-01-02"),
 		},
-		Cliente: BillingCustomer{
-			TipoDocumento:   mapTipoDoc(customer.TipoDocumento),
-			NumeroDocumento: customer.NumeroDocumento,
-			RazonSocial:     customer.Nombre,
-			Direccion:       customer.Direccion,
-		},
+		Cliente: prepareBillingCustomer(customer),
+		Items: billingItems,
 		Totales: BillingTotals{
 			TotalVenta:     sale.Total,
 			TotalImpuestos: sale.IGV,
 		},
 	}
 
-	// Map Items
-	for _, item := range items {
-		var product models.Product
-		config.DB.Select("nombre").First(&product, item.ProductID)
-
-		payload.Items = append(payload.Items, BillingItem{
-			Descripcion:    product.Nombre,
-			Cantidad:       item.Cantidad,
-			PrecioUnitario: item.PrecioUnitario,
-			Subtotal:       (item.Cantidad * item.PrecioUnitario) - item.Descuento - (sale.IGV * (item.Cantidad * item.PrecioUnitario / sale.Total)), // Simplified subtotal
-		})
+	if sale.TipoDocumento == "01" && hasServices && sale.Total > 700 {
+		payload.Detraccion = &BillingDetraccion{
+			CodigoBienServicio: "022",
+			CodigoMedioPago:    "001",
+			Porcentaje:         12.00,
+			Monto:              sale.Total * 0.12,
+		}
 	}
 
-	// 3. Send HTTP Request
+	// 3. Initialize/Get Electronic Document for Payload Tracking
+	var electronicDoc models.ElectronicDocument
+	dbErr := config.DB.Where("sale_id = ?", sale.ID).First(&electronicDoc).Error
+
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to serialize payload: %w", err)
+	}
+	electronicDoc.CompanyID = sale.CompanyID
+	electronicDoc.SaleID = &sale.ID
+	electronicDoc.FacturacionPayload = string(jsonData)
+	electronicDoc.TipoDocumento = payload.Header.TipoDocumento
+	electronicDoc.Serie = payload.Header.Serie
+	electronicDoc.Numero = fmt.Sprintf("%08d", payload.Header.Numero)
+	electronicDoc.Estado = "pending"
+
+	if dbErr != nil {
+		electronicDoc.ID = uuid.New()
+		config.DB.Create(&electronicDoc)
+	} else {
+		config.DB.Save(&electronicDoc)
 	}
 
+	// 4. Send HTTP Request
 	req, err := http.NewRequest("POST", apiURL+"/api/v1/documents/emit", bytes.NewBuffer(jsonData))
 	if err != nil {
+		electronicDoc.Estado = "error"
+		electronicDoc.FacturacionError = err.Error()
+		config.DB.Save(&electronicDoc)
 		return nil, err
 	}
 
@@ -196,33 +237,190 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		electronicDoc.Estado = "error"
+		electronicDoc.FacturacionError = err.Error()
+		config.DB.Save(&electronicDoc)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// 5. Handle Technical Errors (4xx/5xx)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		electronicDoc.Estado = "error"
+		electronicDoc.FacturacionError = string(body)
+		config.DB.Save(&electronicDoc)
 		return nil, fmt.Errorf("FacturaAPI error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var emitResp EmitResponse
 	if err := json.Unmarshal(body, &emitResp); err != nil {
+		electronicDoc.Estado = "error"
+		electronicDoc.FacturacionError = "JSON Unmarshal Error: " + err.Error()
+		config.DB.Save(&electronicDoc)
 		return nil, err
 	}
 
-	// 4. Save Electronic Document Record
-	electronicDoc := models.ElectronicDocument{
-		CompanyID:     sale.CompanyID,
-		SaleID:        &sale.ID,
-		DocumentUUID:  emitResp.DocumentoID,
-		TipoDocumento: payload.Header.TipoDocumento,
-		Serie:         payload.Header.Serie,
-		Numero:        fmt.Sprintf("%08d", payload.Header.Numero),
-		Estado:        emitResp.Status,
+	// 6. Update Document with API Response
+	electronicDoc.DocumentUUID = emitResp.DocumentoID
+	electronicDoc.Estado = emitResp.Status
+	
+	// Process SUNAT messages/notes
+	sunatMsg := emitResp.SunatResponse
+	if sunatMsg == "" {
+		sunatMsg = emitResp.SunatDescription
 	}
-	config.DB.Create(&electronicDoc)
+	if emitResp.SunatNotes != "" {
+		if sunatMsg != "" {
+			sunatMsg += "\n" + emitResp.SunatNotes
+		} else {
+			sunatMsg = emitResp.SunatNotes
+		}
+	}
+	
+	electronicDoc.SunatResponse = s.ParseSunatResponse(sunatMsg)
+	electronicDoc.FacturacionError = "" // Clear any previous technical error if success
+	
+	// Base URLs for downloads
+	electronicDoc.PdfURL = apiURL + "/api/v1/download/" + emitResp.DocumentoID + "/pdf"
+	electronicDoc.XmlURL = emitResp.Files.XML
+	electronicDoc.CdrURL = emitResp.Files.CDR
+
+	// If the CDR URL exists, try to extract notes from it
+	if electronicDoc.CdrURL != "" {
+		cdrNotes, err := s.ExtractNotesFromCDR(electronicDoc.CdrURL)
+		if err == nil && cdrNotes != "" {
+			if electronicDoc.SunatResponse != "" {
+				if !strings.Contains(electronicDoc.SunatResponse, cdrNotes) {
+					electronicDoc.SunatResponse += "\n" + cdrNotes
+				}
+			} else {
+				electronicDoc.SunatResponse = cdrNotes
+			}
+		}
+	}
+
+	// Identify Observations (Accepted but with notes)
+	if electronicDoc.Estado == "accepted" && electronicDoc.SunatResponse != "" {
+		electronicDoc.Observaciones = electronicDoc.SunatResponse
+	}
+
+	config.DB.Save(&electronicDoc)
 
 	return &emitResp, nil
+}
+
+// ParseSunatResponse extracts human-readable notes from SUNAT XML/raw response
+func (s *BillingService) ParseSunatResponse(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	// Check for Note or Description tags (with or without namespaces)
+	hasNote := strings.Contains(raw, "Note>")
+	hasDesc := strings.Contains(raw, "Description>")
+
+	if !hasNote && !hasDesc {
+		return raw
+	}
+
+	var notes []string
+
+	// 1. Extract <cbc:Note> or <Note>
+	matchesNote := reNote.FindAllStringSubmatch(raw, -1)
+	for _, match := range matchesNote {
+		if len(match) > 1 {
+			note := strings.TrimSpace(match[1])
+			if note != "" && !contains(notes, note) {
+				notes = append(notes, note)
+			}
+		}
+	}
+
+	// 2. Extract <cbc:Description> or <Description>
+	matchesDesc := reDesc.FindAllStringSubmatch(raw, -1)
+	for _, match := range matchesDesc {
+		if len(match) > 1 {
+			desc := strings.TrimSpace(match[1])
+			if desc != "" && !contains(notes, desc) {
+				notes = append(notes, desc)
+			}
+		}
+	}
+
+	if len(notes) == 0 {
+		return raw
+	}
+
+	return strings.Join(notes, "\n")
+}
+
+// ExtractNotesFromCDR downloads a CDR zip, extracts the XML, and parses the notes
+func (s *BillingService) ExtractNotesFromCDR(cdrURL string) (string, error) {
+	if cdrURL == "" {
+		return "", nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(cdrURL)
+	if err != nil {
+		return "", fmt.Errorf("error downloading CDR: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("error downloading CDR, status: %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	zipReader, err := zip.NewReader(bytes.NewReader(bodyBytes), int64(len(bodyBytes)))
+	if err != nil {
+		// Might not be a zip file (e.g. direct XML or error text)
+		return s.ParseSunatResponse(string(bodyBytes)), nil
+	}
+
+	var notes string
+	for _, f := range zipReader.File {
+		if strings.HasSuffix(f.Name, ".xml") {
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			xmlBytes, err := io.ReadAll(rc)
+			rc.Close()
+			if err == nil {
+				// Parse the XML content
+				parsedNotes := s.ParseSunatResponse(string(xmlBytes))
+				if parsedNotes != "" {
+					if notes != "" {
+						notes += "\n" + parsedNotes
+					} else {
+						notes = parsedNotes
+					}
+				}
+			}
+		}
+	}
+
+	return notes, nil
+}
+
+// Helper to check if slice contains string
+func contains(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }
 
 // SyncLogo sends the business logo to FacturaAPI for printed representations
@@ -302,9 +500,9 @@ func (s *BillingService) SyncLogo(companyID uuid.UUID, logoBase64 string) error 
 	}
 
 	return nil
-	}
+}
 
-// mapTipoDoc converts ERP doc types to SUNAT codes
+// mapTipoDoc converts ERP doc types to SUNAT codes (Catálogo 06)
 func mapTipoDoc(tipo string) string {
 	switch tipo {
 	case "DNI":
@@ -313,7 +511,34 @@ func mapTipoDoc(tipo string) string {
 		return "6"
 	case "CE":
 		return "4"
+	case "PASAPORTE":
+		return "7"
+	case "SIN_DOCUMENTO":
+		return "0"
 	default:
 		return "1"
+	}
+}
+
+// prepareBillingCustomer prepares the customer structure for FacturaAPI
+// applying the generic client rules if applicable.
+func prepareBillingCustomer(customer models.Customer) BillingCustomer {
+	numDoc := strings.TrimSpace(customer.NumeroDocumento)
+	tipoDoc := strings.ToUpper(strings.TrimSpace(customer.TipoDocumento))
+
+	if numDoc == "00000000" || numDoc == "0" || tipoDoc == "SIN_DOCUMENTO" || tipoDoc == "-" {
+		return BillingCustomer{
+			TipoDocumento:   "-",
+			NumeroDocumento: "0",
+			RazonSocial:     "CLIENTES VARIOS",
+			Direccion:       customer.Direccion,
+		}
+	}
+
+	return BillingCustomer{
+		TipoDocumento:   mapTipoDoc(tipoDoc),
+		NumeroDocumento: numDoc,
+		RazonSocial:     customer.Nombre,
+		Direccion:       customer.Direccion,
 	}
 }
