@@ -1112,26 +1112,57 @@ func VoidElectronicDocument(c *gin.Context) {
 	billingService := services.NewBillingService()
 	doc.SunatResponse = billingService.ParseSunatResponse(sunatMsg)
 
-	if doc.Estado == "accepted" && doc.SunatResponse != "" {
-	doc.Observaciones = doc.SunatResponse
-	}
-
 	// 5. If we have a CDR, try to extract notes
 	if doc.CdrURL != "" {
-	cdrNotes, err := billingService.ExtractNotesFromCDR(doc.CdrURL)
-	if err == nil && cdrNotes != "" {
-	if doc.SunatResponse != "" {
-	if !strings.Contains(doc.SunatResponse, cdrNotes) {
-	doc.SunatResponse += "\n" + cdrNotes
-	}
-	} else {
-	doc.SunatResponse = cdrNotes
-	}
-	}
+		cdrNotes, err := billingService.ExtractNotesFromCDR(doc.CdrURL)
+		if err == nil && cdrNotes != "" {
+			if doc.SunatResponse != "" {
+				if !strings.Contains(doc.SunatResponse, cdrNotes) {
+					doc.SunatResponse += "\n" + cdrNotes
+				}
+			} else {
+				doc.SunatResponse = cdrNotes
+			}
+		}
 	}
 
-	// 6. Save
+	// 6. Smart Status Detection (Fallback for inconsistent API status)
+	msgLower := strings.ToLower(doc.SunatResponse)
+	if doc.Estado == "pending" || doc.Estado == "error" || doc.Estado == "" {
+		if strings.Contains(msgLower, "aceptada") || strings.Contains(msgLower, "ha sido aceptada") || doc.CdrURL != "" {
+			doc.Estado = "accepted"
+		} else if strings.Contains(msgLower, "rechazada") || strings.Contains(msgLower, "ha sido rechazada") {
+			doc.Estado = "rejected"
+		}
+	}
+
+	if doc.Estado == "accepted" && doc.SunatResponse != "" {
+		doc.Observaciones = doc.SunatResponse
+	}
+
+	// 7. Ensure PDF URL is set
+	if doc.PdfURL == "" && doc.DocumentUUID != nil {
+		// Resolve API URL for PDF generation
+		var billingConfig models.BillingConfig
+		if err := config.DB.Where("company_id = ?", doc.CompanyID).First(&billingConfig).Error; err == nil {
+			apiURL := billingConfig.ApiURL
+			if apiURL == "" {
+				var globalURLSetting models.CompanySetting
+				if err := config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting).Error; err == nil {
+					apiURL = globalURLSetting.Valor
+				}
+			}
+			if apiURL != "" {
+				apiURL = strings.TrimSuffix(apiURL, "/")
+				apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+				doc.PdfURL = apiURL + "/api/v1/download/" + *doc.DocumentUUID + "/pdf"
+			}
+		}
+	}
+
+	// 8. Save
 	if err := config.DB.Save(&doc).Error; err != nil {
+
 	log.Printf("[Webhook] Error saving document status: %v", err)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
 	return

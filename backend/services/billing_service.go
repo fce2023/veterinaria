@@ -1100,7 +1100,7 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 		doc.CdrURL = statusResp.Files.CDR
 	}
 
-	// Download/Extract from CDR if possible
+	// 4. Download/Extract from CDR if possible
 	if doc.CdrURL != "" {
 		cdrNotes, err := s.ExtractNotesFromCDR(doc.CdrURL)
 		if err == nil && cdrNotes != "" {
@@ -1114,8 +1114,23 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 		}
 	}
 
+	// 5. Smart Status Detection (Fallback for inconsistent API status)
+	msgLower := strings.ToLower(doc.SunatResponse)
+	if doc.Estado == "pending" || doc.Estado == "error" || doc.Estado == "" {
+		if strings.Contains(msgLower, "aceptada") || strings.Contains(msgLower, "ha sido aceptada") || doc.CdrURL != "" {
+			doc.Estado = "accepted"
+		} else if strings.Contains(msgLower, "rechazada") || strings.Contains(msgLower, "ha sido rechazada") {
+			doc.Estado = "rejected"
+		}
+	}
+
 	if doc.Estado == "accepted" && doc.SunatResponse != "" {
 		doc.Observaciones = doc.SunatResponse
+	}
+
+	// Ensure PDF URL is set
+	if doc.PdfURL == "" && doc.DocumentUUID != nil {
+		doc.PdfURL = apiURL + "/api/v1/download/" + *doc.DocumentUUID + "/pdf"
 	}
 
 	config.DB.Save(doc)
