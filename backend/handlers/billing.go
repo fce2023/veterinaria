@@ -1044,8 +1044,99 @@ func VoidElectronicDocument(c *gin.Context) {
 	config.DB.Save(&doc)
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Solicitud de anulación (Baja) enviada correctamente",
-		"data":    doc,
+	        "success": true,
+	        "message": "Solicitud de anulación (Baja) enviada correctamente",
+	        "data":    doc,
 	})
-}
+	}
+
+	// HandleFacturaAPIWebhook receives POST notifications from FacturaAPI when a document changes status
+	func HandleFacturaAPIWebhook(c *gin.Context) {
+	var payload struct {
+	DocumentoID      string `json:"documento_id"`
+	Status           string `json:"status"`
+	SunatResponse    string `json:"sunat_response"`
+	SunatDescription string `json:"sunat_description"`
+	SunatNotes       string `json:"sunat_notes"`
+	Files            struct {
+	XML string `json:"xml"`
+	CDR string `json:"cdr"`
+	} `json:"files"`
+	}
+
+	if err := c.ShouldBindJSON(&payload); err != nil {
+	log.Printf("[Webhook] Error binding JSON: %v", err)
+	c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	return
+	}
+
+	if payload.DocumentoID == "" {
+	c.JSON(http.StatusBadRequest, gin.H{"error": "documento_id is required"})
+	return
+	}
+
+	log.Printf("[Webhook] Received update for document %s: New Status = %s", payload.DocumentoID, payload.Status)
+
+	// 1. Find document by UUID
+	var doc models.ElectronicDocument
+	if err := config.DB.Where("document_uuid = ?", payload.DocumentoID).First(&doc).Error; err != nil {
+	log.Printf("[Webhook] Document %s not found in local DB", payload.DocumentoID)
+	c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+	return
+	}
+
+	// 2. Update Status
+	doc.Estado = payload.Status
+
+	// 3. Update URLs
+	if payload.Files.XML != "" {
+	doc.XmlURL = payload.Files.XML
+	}
+	if payload.Files.CDR != "" {
+	doc.CdrURL = payload.Files.CDR
+	}
+
+	// 4. Process messages
+	sunatMsg := payload.SunatResponse
+	if sunatMsg == "" {
+	sunatMsg = payload.SunatDescription
+	}
+	if payload.SunatNotes != "" {
+	if sunatMsg != "" {
+	sunatMsg += "\n" + payload.SunatNotes
+	} else {
+	sunatMsg = payload.SunatNotes
+	}
+	}
+
+	billingService := services.NewBillingService()
+	doc.SunatResponse = billingService.ParseSunatResponse(sunatMsg)
+
+	if doc.Estado == "accepted" && doc.SunatResponse != "" {
+	doc.Observaciones = doc.SunatResponse
+	}
+
+	// 5. If we have a CDR, try to extract notes
+	if doc.CdrURL != "" {
+	cdrNotes, err := billingService.ExtractNotesFromCDR(doc.CdrURL)
+	if err == nil && cdrNotes != "" {
+	if doc.SunatResponse != "" {
+	if !strings.Contains(doc.SunatResponse, cdrNotes) {
+	doc.SunatResponse += "\n" + cdrNotes
+	}
+	} else {
+	doc.SunatResponse = cdrNotes
+	}
+	}
+	}
+
+	// 6. Save
+	if err := config.DB.Save(&doc).Error; err != nil {
+	log.Printf("[Webhook] Error saving document status: %v", err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
+	return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+	}
+

@@ -96,6 +96,7 @@ func main() {
 		v1.POST("/companies/register", handlers.CreateCompany) // Onboarding endpoint
 		v1.GET("/public/ruc/:ruc", handlers.QueryRUC)          // Public RUC search endpoint
 		v1.GET("/public/dni/:dni", handlers.QueryDNI)          // Public DNI search endpoint
+		v1.POST("/public/billing/webhook", handlers.HandleFacturaAPIWebhook) // Webhook endpoint
 
 		// Protected Routes
 		protected := v1.Group("")

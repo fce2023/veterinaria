@@ -716,6 +716,13 @@ func (s *BillingService) SyncCompanyInfo(company models.Company) error {
 		"modo":             apiMode,
 	}
 
+	if billingConfig.CorrelativoPadding != nil {
+		payload["correlativo_padding"] = *billingConfig.CorrelativoPadding
+	}
+	if billingConfig.WebhookURL != "" {
+		payload["webhook_url"] = billingConfig.WebhookURL
+	}
+
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return err

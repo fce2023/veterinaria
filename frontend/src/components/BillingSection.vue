@@ -253,6 +253,16 @@
               />
               <p class="field-hint">Identificador único en FacturaAPI. Se autogenera si está vacío y existe una API Key global.</p>
             </div>
+            <div class="field">
+              <label class="field-label">Webhook URL (Opcional)</label>
+              <input
+                v-model="config.webhook_url"
+                type="text"
+                placeholder="https://tu-erp.com/api/v1/public/billing/webhook"
+                class="field-input field-input--mono"
+              />
+              <p class="field-hint">URL para recibir notificaciones en tiempo real del cambio de estado de los documentos.</p>
+            </div>
           </div>
           <div class="form-grid form-grid--1" style="margin-top: 14px;">
             <div class="field">
@@ -1061,7 +1071,8 @@ const config = reactive({
   client_secret: '',
   logo_base64: '',
   emision_diferida: false,
-  correlativo_padding: 8
+  correlativo_padding: 8,
+  webhook_url: ''
 })
 
 const saveLogs = ref<string[]>([])
