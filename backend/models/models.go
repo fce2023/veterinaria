@@ -54,6 +54,7 @@ type Branch struct {
 	SerieBoleta        string    `gorm:"type:varchar(4)" json:"serie_boleta"`
 	CorrelativoFactura int       `gorm:"type:integer;default:0" json:"correlativo_factura"`
 	CorrelativoBoleta  int       `gorm:"type:integer;default:0" json:"correlativo_boleta"`
+	CorrelativoPadding int       `gorm:"type:integer;default:8" json:"correlativo_padding"`
 	Estado             string    `gorm:"type:varchar(50);default:'active'" json:"estado"`
 }
 
@@ -277,6 +278,7 @@ type BillingConfig struct {
 	LogoBase64        string    `gorm:"type:text" json:"logo_base64"`
 	EmisionDiferida   bool      `gorm:"type:boolean;default:false" json:"emision_diferida"`
 	CorrelativoPadding *int     `gorm:"type:integer" json:"correlativo_padding"`
+	WebhookURL        string    `gorm:"type:varchar(500)" json:"webhook_url"`
 }
 
 // ElectronicDocument billing record

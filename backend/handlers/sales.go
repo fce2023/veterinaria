@@ -257,23 +257,34 @@ func CreateSale(c *gin.Context) {
 	}
 
 	var nextNumber int = 1
+	useBranchConfig := false
 	if input.TipoDocumento == "01" {
 		if branch.CorrelativoFactura > 0 {
 			nextNumber = branch.CorrelativoFactura
+			useBranchConfig = true
 		}
 	} else if input.TipoDocumento == "03" {
 		if branch.CorrelativoBoleta > 0 {
 			nextNumber = branch.CorrelativoBoleta
+			useBranchConfig = true
 		}
 	}
 
-	var lastSale models.Sale
-	if err := tx.Where("branch_id = ? AND tipo_documento = ? AND serie = ?", branchID, input.TipoDocumento, serie).Order("created_at desc").First(&lastSale).Error; err == nil {
-		if n, err := strconv.Atoi(lastSale.Numero); err == nil {
-			if n >= nextNumber {
+	// Only search for the last sale if we are NOT explicitly forcing a start number from branch config
+	// OR if the user is just continuing the sequence (standard behavior).
+	// If the user manually set/reset the correlativo in branch settings, we honor it.
+	if !useBranchConfig {
+		var lastSale models.Sale
+		if err := tx.Where("branch_id = ? AND tipo_documento = ? AND serie = ?", branchID, input.TipoDocumento, serie).Order("created_at desc").First(&lastSale).Error; err == nil {
+			if n, err := strconv.Atoi(lastSale.Numero); err == nil {
 				nextNumber = n + 1
 			}
 		}
+	}
+
+	padding := 8
+	if branch.CorrelativoPadding >= 0 {
+		padding = branch.CorrelativoPadding
 	}
 
 	sale := models.Sale{
@@ -283,7 +294,7 @@ func CreateSale(c *gin.Context) {
 		UserID:        userID,
 		TipoDocumento: input.TipoDocumento,
 		Serie:         serie,
-		Numero:        fmt.Sprintf("%d", nextNumber),
+		Numero:        fmt.Sprintf("%0*d", padding, nextNumber),
 		MetodoPago:    input.MetodoPago,
 		Subtotal:      totalSubtotal,
 		IGV:           totalIGV,
@@ -295,6 +306,15 @@ func CreateSale(c *gin.Context) {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create sale header"})
 		return
+	}
+
+	// Increment Branch Correlative in DB to prevent duplicates
+	if input.TipoDocumento == "01" {
+		branch.CorrelativoFactura = nextNumber + 1
+		tx.Save(&branch)
+	} else if input.TipoDocumento == "03" {
+		branch.CorrelativoBoleta = nextNumber + 1
+		tx.Save(&branch)
 	}
 
 	// Update Cash Session

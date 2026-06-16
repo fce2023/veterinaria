@@ -9,6 +9,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"veterinaria/backend/config"
@@ -74,6 +75,7 @@ func SaveBillingConfig(c *gin.Context) {
 		ClientSecret        string `json:"client_secret"`
 		EmisionDiferida     bool   `json:"emision_diferida"`
 		CorrelativoPadding  *int   `json:"correlativo_padding"`
+		WebhookURL          string `json:"webhook_url"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -96,6 +98,7 @@ func SaveBillingConfig(c *gin.Context) {
 	billingConfig.ClientSecret = input.ClientSecret
 	billingConfig.EmisionDiferida = input.EmisionDiferida
 	billingConfig.CorrelativoPadding = input.CorrelativoPadding
+	billingConfig.WebhookURL = input.WebhookURL
 	if input.CertificadoBase64 != "" {
 		billingConfig.CertificadoBase64 = input.CertificadoBase64
 	}
@@ -564,6 +567,7 @@ func UpdateBillingSeries(c *gin.Context) {
 		SerieBoleta        string `json:"serie_boleta"`
 		CorrelativoFactura int    `json:"correlativo_factura"`
 		CorrelativoBoleta  int    `json:"correlativo_boleta"`
+		CorrelativoPadding int    `json:"correlativo_padding"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -575,6 +579,7 @@ func UpdateBillingSeries(c *gin.Context) {
 	branch.SerieBoleta = input.SerieBoleta
 	branch.CorrelativoFactura = input.CorrelativoFactura
 	branch.CorrelativoBoleta = input.CorrelativoBoleta
+	branch.CorrelativoPadding = input.CorrelativoPadding
 
 	if err := config.DB.Save(&branch).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al guardar la configuración"})
@@ -584,6 +589,70 @@ func UpdateBillingSeries(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Series y correlativos actualizados correctamente",
+		"data":    branch,
+	})
+}
+
+// ResetBillingSeries allows resetting correlatives to 1 only if no documents have been emitted
+func ResetBillingSeries(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	branchIDStr := c.Param("id")
+	branchID, err := uuid.Parse(branchIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de sucursal inválido"})
+		return
+	}
+
+	var input struct {
+		Type string `json:"type"` // "factura" or "boleta"
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	var branch models.Branch
+	if err := config.DB.Where("id = ? AND company_id = ?", branchID, companyID).First(&branch).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Sucursal no encontrada"})
+		return
+	}
+
+	// Safety check: check if any electronic documents exist for this branch and type
+	var count int64
+	docType := "01"
+	if input.Type == "boleta" {
+		docType = "03"
+	}
+
+	config.DB.Model(&models.ElectronicDocument{}).
+		Joins("JOIN sales ON electronic_documents.sale_id = sales.id").
+		Where("sales.branch_id = ? AND electronic_documents.tipo_documento = ?", branchID, docType).
+		Count(&count)
+
+	if count > 0 {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("No se puede reiniciar el contador porque ya existen %d comprobantes emitidos de este tipo.", count),
+		})
+		return
+	}
+
+	if input.Type == "factura" {
+		branch.CorrelativoFactura = 1
+	} else {
+		branch.CorrelativoBoleta = 1
+	}
+
+	if err := config.DB.Save(&branch).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al reiniciar correlativo"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Contador reiniciado con éxito",
 		"data":    branch,
 	})
 }
@@ -660,152 +729,12 @@ func SyncElectronicDocumentStatus(c *gin.Context) {
 		return
 	}
 
-	// 1. Get Billing Config for credentials
-	var billingConfig models.BillingConfig
-	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Configuración de facturación no encontrada"})
-		return
-	}
-
-	apiURL := billingConfig.ApiURL
-	apiKey := billingConfig.ApiKey
-	if apiURL == "" || apiKey == "" {
-		var globalURLSetting models.CompanySetting
-		var globalKeySetting models.CompanySetting
-		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting)
-		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting)
-		if apiURL == "" { apiURL = globalURLSetting.Valor }
-		if apiKey == "" { apiKey = globalKeySetting.Valor }
-	}
-
-	if apiURL == "" || apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Configuración API incompleta"})
-		return
-	}
-
-	apiURL = strings.TrimSuffix(apiURL, "/")
-	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
-
-	// 2. Query Status
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", apiURL+"/api/v1/documents/"+*doc.DocumentUUID+"/status", nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
-
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al conectar con la API: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		c.JSON(resp.StatusCode, gin.H{"success": false, "error": fmt.Sprintf("Error API (%d): %s", resp.StatusCode, string(body))})
-		return
-	}
-
-	var statusResp struct {
-		Status           string `json:"status"`
-		SunatResponse    string `json:"sunat_response"`
-		SunatDescription string `json:"sunat_description"`
-		SunatNotes       string `json:"sunat_notes"`
-		Files            struct {
-			XML string `json:"xml"`
-			CDR string `json:"cdr"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(body, &statusResp); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al procesar respuesta de estado"})
-		return
-	}
-
-	// 3. Update DB
 	billingService := services.NewBillingService()
-	doc.Estado = statusResp.Status
-
-	// 4. Fetch files if they are not included in status response (usually happens with async)
-	if statusResp.Files.CDR == "" && (doc.Estado == "accepted" || doc.Estado == "rejected" || doc.Estado == "error") {
-		reqFiles, err := http.NewRequest("GET", apiURL+"/api/v1/documents/"+*doc.DocumentUUID+"/files", nil)
-		if err == nil {
-			reqFiles.Header.Set("Authorization", "Bearer "+apiKey)
-			reqFiles.Header.Set("Accept", "application/json")
-			respFiles, err := client.Do(reqFiles)
-			if err == nil {
-				defer respFiles.Body.Close()
-				bodyFiles, _ := io.ReadAll(respFiles.Body)
-				if respFiles.StatusCode == http.StatusOK {
-					var filesResp struct {
-						Files struct {
-							XML string `json:"xml"`
-							CDR string `json:"cdr"`
-						} `json:"files"`
-					}
-					if err := json.Unmarshal(bodyFiles, &filesResp); err == nil {
-						if filesResp.Files.XML != "" {
-							doc.XmlURL = filesResp.Files.XML
-						}
-						if filesResp.Files.CDR != "" {
-							doc.CdrURL = filesResp.Files.CDR
-						}
-					}
-				}
-			}
-		}
+	_, err = billingService.SyncDocumentStatus(companyID, &doc)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": err.Error()})
+		return
 	}
-	
-	// Process messages
-	sunatMsg := statusResp.SunatResponse
-	if sunatMsg == "" {
-		sunatMsg = statusResp.SunatDescription
-	}
-	if statusResp.SunatNotes != "" {
-		if sunatMsg != "" {
-			sunatMsg += "\n" + statusResp.SunatNotes
-		} else {
-			sunatMsg = statusResp.SunatNotes
-		}
-	}
-	
-	doc.SunatResponse = billingService.ParseSunatResponse(sunatMsg)
-	
-	// Update URLs if provided
-	if statusResp.Files.XML != "" {
-		doc.XmlURL = statusResp.Files.XML
-	}
-	if statusResp.Files.CDR != "" {
-		doc.CdrURL = statusResp.Files.CDR
-	}
-	
-	// If the CDR URL exists and we don't have detailed notes from the API directly, try to extract from CDR
-	if doc.CdrURL != "" {
-		cdrNotes, err := billingService.ExtractNotesFromCDR(doc.CdrURL)
-		if err == nil && cdrNotes != "" {
-			if doc.SunatResponse != "" {
-				// Only append if it's new information to avoid duplicates
-				if !strings.Contains(doc.SunatResponse, cdrNotes) {
-					doc.SunatResponse += "\n" + cdrNotes
-				}
-			} else {
-				doc.SunatResponse = cdrNotes
-			}
-		}
-	}
-	
-	// Identify Observations
-
-	if doc.Estado == "accepted" && doc.SunatResponse != "" {
-		doc.Observaciones = doc.SunatResponse
-	} else {
-		doc.Observaciones = "" // Clear if no longer accepted or no notes
-	}
-
-	config.DB.Save(&doc)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -970,7 +899,15 @@ func UpdateElectronicDocumentDraft(c *gin.Context) {
 
 		// 3. Update Sale header metadata
 		if input.Serie != "" { sale.Serie = input.Serie }
-		if input.Numero != "" { sale.Numero = input.Numero }
+		if input.Numero != "" { 
+			// Ensure it has 8 digits
+			numInt, err := strconv.Atoi(input.Numero)
+			if err == nil {
+				sale.Numero = fmt.Sprintf("%08d", numInt)
+			} else {
+				sale.Numero = input.Numero 
+			}
+		}
 		if input.FechaEmision != "" {
 			t, err := time.Parse("2006-01-02", input.FechaEmision)
 			if err == nil {
@@ -982,7 +919,14 @@ func UpdateElectronicDocumentDraft(c *gin.Context) {
 
 	// 4. Update Document sync info
 	if input.Serie != "" { doc.Serie = input.Serie }
-	if input.Numero != "" { doc.Numero = input.Numero }
+	if input.Numero != "" { 
+		numInt, err := strconv.Atoi(input.Numero)
+		if err == nil {
+			doc.Numero = fmt.Sprintf("%08d", numInt)
+		} else {
+			doc.Numero = input.Numero
+		}
+	}
 	
 	doc.Observaciones = "Editado manualmente (Detalles y Totales). " + doc.Observaciones
 	tx.Save(&doc)

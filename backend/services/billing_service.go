@@ -312,6 +312,15 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	log.Printf("[Billing] Emitting %s %s-%s for company %s. Fiscal Info: Ubigeo=%s, Dept=%s", 
 		sale.TipoDocumento, sale.Serie, sale.Numero, company.RazonSocial, company.Ubigeo, company.Departamento)
 
+	// 1.7 Fetch Branch for padding config
+	var branch models.Branch
+	padding := 8
+	if err := config.DB.First(&branch, sale.BranchID).Error; err == nil {
+		if branch.CorrelativoPadding >= 0 {
+			padding = branch.CorrelativoPadding
+		}
+	}
+
 	// 2. Prepare Payload
 	var customer models.Customer
 	if err := config.DB.First(&customer, sale.CustomerID).Error; err != nil {
@@ -408,6 +417,14 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	var electronicDoc models.ElectronicDocument
 	dbErr := config.DB.Where("sale_id = ?", sale.ID).First(&electronicDoc).Error
 
+	// IDEMPOTENCY CHECK: If it already has a DocumentUUID and is NOT in 'error' or 'draft', 
+	// we should query the API instead of emitting again.
+	if dbErr == nil && electronicDoc.DocumentUUID != nil && *electronicDoc.DocumentUUID != "" && 
+		electronicDoc.Estado != "error" && electronicDoc.Estado != "draft" && electronicDoc.Estado != "rejected" {
+		log.Printf("[Billing] Sale %s already has DocumentUUID %s. Syncing status instead of re-emitting.", sale.ID, *electronicDoc.DocumentUUID)
+		return s.SyncDocumentStatus(sale.CompanyID, &electronicDoc)
+	}
+
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize payload: %w", err)
@@ -417,7 +434,7 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	electronicDoc.FacturacionPayload = string(jsonData)
 	electronicDoc.TipoDocumento = payload.Header.TipoDocumento
 	electronicDoc.Serie = payload.Header.Serie
-	electronicDoc.Numero = fmt.Sprintf("%08d", payload.Header.Numero)
+	electronicDoc.Numero = fmt.Sprintf("%0*d", padding, payload.Header.Numero)
 	electronicDoc.Estado = "pending"
 
 	if dbErr != nil {
@@ -697,10 +714,6 @@ func (s *BillingService) SyncCompanyInfo(company models.Company) error {
 		"provincia":        clean(company.Provincia),
 		"distrito":         clean(company.Distrito),
 		"modo":             apiMode,
-	}
-
-	if billingConfig.CorrelativoPadding != nil {
-		payload["correlativo_padding"] = *billingConfig.CorrelativoPadding
 	}
 
 	jsonPayload, err := json.Marshal(payload)
@@ -983,3 +996,130 @@ func prepareBillingCustomer(customer models.Customer) BillingCustomer {
 		Direccion:       customer.Direccion,
 	}
 }
+
+// SyncDocumentStatus queries FacturaAPI for the latest status of a document and updates the local record
+func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.ElectronicDocument) (*EmitResponse, error) {
+	if doc.DocumentUUID == nil || *doc.DocumentUUID == "" {
+		return nil, fmt.Errorf("document has no UUID")
+	}
+
+	// 1. Get Billing Config
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		return nil, fmt.Errorf("billing configuration not found")
+	}
+
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting)
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting)
+		if apiURL == "" {
+			apiURL = globalURLSetting.Valor
+		}
+		if apiKey == "" {
+			apiKey = globalKeySetting.Valor
+		}
+	}
+
+	if apiURL == "" || apiKey == "" {
+		return nil, fmt.Errorf("FacturaAPI configuration missing")
+	}
+
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 2. Query Status
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", apiURL+"/api/v1/documents/"+*doc.DocumentUUID+"/status", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FacturaAPI error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var statusResp struct {
+		Status           string `json:"status"`
+		SunatResponse    string `json:"sunat_response"`
+		SunatDescription string `json:"sunat_description"`
+		SunatNotes       string `json:"sunat_notes"`
+		Files            struct {
+			XML string `json:"xml"`
+			CDR string `json:"cdr"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(body, &statusResp); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %w", err)
+	}
+
+	// 3. Update Local Document
+	doc.Estado = statusResp.Status
+
+	// Process messages
+	sunatMsg := statusResp.SunatResponse
+	if sunatMsg == "" {
+		sunatMsg = statusResp.SunatDescription
+	}
+	if statusResp.SunatNotes != "" {
+		if sunatMsg != "" {
+			sunatMsg += "\n" + statusResp.SunatNotes
+		} else {
+			sunatMsg = statusResp.SunatNotes
+		}
+	}
+
+	doc.SunatResponse = s.ParseSunatResponse(sunatMsg)
+
+	// Update URLs
+	if statusResp.Files.XML != "" {
+		doc.XmlURL = statusResp.Files.XML
+	}
+	if statusResp.Files.CDR != "" {
+		doc.CdrURL = statusResp.Files.CDR
+	}
+
+	// Download/Extract from CDR if possible
+	if doc.CdrURL != "" {
+		cdrNotes, err := s.ExtractNotesFromCDR(doc.CdrURL)
+		if err == nil && cdrNotes != "" {
+			if doc.SunatResponse != "" {
+				if !strings.Contains(doc.SunatResponse, cdrNotes) {
+					doc.SunatResponse += "\n" + cdrNotes
+				}
+			} else {
+				doc.SunatResponse = cdrNotes
+			}
+		}
+	}
+
+	if doc.Estado == "accepted" && doc.SunatResponse != "" {
+		doc.Observaciones = doc.SunatResponse
+	}
+
+	config.DB.Save(doc)
+
+	// Return an EmitResponse compatible structure
+	return &EmitResponse{
+		DocumentoID:      *doc.DocumentUUID,
+		Status:           doc.Estado,
+		SunatResponse:    doc.SunatResponse,
+		SunatDescription: statusResp.SunatDescription,
+		SunatNotes:       statusResp.SunatNotes,
+	}, nil
+}
+
