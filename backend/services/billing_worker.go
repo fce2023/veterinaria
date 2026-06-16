@@ -25,8 +25,8 @@ func StartBillingSyncWorker() {
 func syncPendingDocuments() {
 	var docs []models.ElectronicDocument
 	
-	// Find documents that need syncing
-	err := config.DB.Where("estado IN (?)", []string{"pending", "void_pending"}).Find(&docs).Error
+	// Find documents that need syncing: pending, void_pending or empty/unknown status
+	err := config.DB.Where("estado IN (?) OR estado IS NULL OR estado = ''", []string{"pending", "void_pending"}).Find(&docs).Error
 	if err != nil {
 		log.Printf("[Billing Worker] Error fetching pending documents: %v", err)
 		return
@@ -50,8 +50,8 @@ func syncPendingDocuments() {
 			continue
 		}
 		
-		// Ensure it's still pending
-		if currentDoc.Estado != "pending" && currentDoc.Estado != "void_pending" {
+		// Ensure it's still in a syncable state (pending, void_pending or empty)
+		if currentDoc.Estado != "pending" && currentDoc.Estado != "void_pending" && currentDoc.Estado != "" {
 			continue
 		}
 

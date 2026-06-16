@@ -491,7 +491,10 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	// 6. Update Document with API Response
 	electronicDoc.DocumentUUID = &emitResp.DocumentoID
 	electronicDoc.Estado = emitResp.Status
-	
+	if electronicDoc.Estado == "" {
+		electronicDoc.Estado = "pending" // Default if API doesn't return status
+	}
+
 	// Process SUNAT messages/notes
 	sunatMsg := emitResp.SunatResponse
 	if sunatMsg == "" {
@@ -504,16 +507,47 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 			sunatMsg = emitResp.SunatNotes
 		}
 	}
-	
+
 	electronicDoc.SunatResponse = s.ParseSunatResponse(sunatMsg)
 	electronicDoc.FacturacionError = "" // Clear any previous technical error if success
-	
-	// Base URLs for downloads
-	electronicDoc.PdfURL = apiURL + "/api/v1/download/" + emitResp.DocumentoID + "/pdf"
+
+	// Update URLs
 	electronicDoc.XmlURL = emitResp.Files.XML
 	electronicDoc.CdrURL = emitResp.Files.CDR
+	electronicDoc.PdfURL = apiURL + "/api/v1/download/" + emitResp.DocumentoID + "/pdf"
 
-	// If the CDR URL exists, try to extract notes from it
+	log.Printf("[Billing] API Response for %s-%s: Status=%s, Msg=%s", 
+		electronicDoc.Serie, electronicDoc.Numero, electronicDoc.Estado, electronicDoc.SunatResponse)
+
+	// 7. Smart Status Detection (Fallback for inconsistent API status)
+	msgLower := strings.ToLower(electronicDoc.SunatResponse)
+	isAcceptedMsg := strings.Contains(msgLower, "aceptada") || 
+					 strings.Contains(msgLower, "aceptado") || 
+					 strings.Contains(msgLower, "exito") || 
+					 strings.Contains(msgLower, "éxito") ||
+					 electronicDoc.CdrURL != ""
+
+	isRejectedMsg := strings.Contains(msgLower, "rechazada") || 
+					 strings.Contains(msgLower, "rechazado") || 
+					 strings.Contains(msgLower, "error de datos")
+
+	if electronicDoc.Estado == "pending" || electronicDoc.Estado == "error" || electronicDoc.Estado == "" {
+		if isAcceptedMsg {
+			log.Printf("[Billing] Smart Detection: Upgrading %s-%s from '%s' to accepted", 
+				electronicDoc.Serie, electronicDoc.Numero, electronicDoc.Estado)
+			electronicDoc.Estado = "accepted"
+		} else if isRejectedMsg {
+			log.Printf("[Billing] Smart Detection: Upgrading %s-%s from '%s' to rejected", 
+				electronicDoc.Serie, electronicDoc.Numero, electronicDoc.Estado)
+			electronicDoc.Estado = "rejected"
+		}
+	}
+
+	if electronicDoc.Estado == "accepted" && electronicDoc.SunatResponse != "" {
+		electronicDoc.Observaciones = electronicDoc.SunatResponse
+	}
+
+	// 8. If the CDR URL exists, try to extract notes from it
 	if electronicDoc.CdrURL != "" {
 		cdrNotes, err := s.ExtractNotesFromCDR(electronicDoc.CdrURL)
 		if err == nil && cdrNotes != "" {
@@ -524,19 +558,30 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 			} else {
 				electronicDoc.SunatResponse = cdrNotes
 			}
+			// Update observations again with CDR notes if accepted
+			if electronicDoc.Estado == "accepted" {
+				electronicDoc.Observaciones = electronicDoc.SunatResponse
+			}
 		}
 	}
 
-	// Identify Observations (Accepted but with notes)
-	if electronicDoc.Estado == "accepted" && electronicDoc.SunatResponse != "" {
-		electronicDoc.Observaciones = electronicDoc.SunatResponse
+	// Use explicit updates to ensure all fields are persisted correctly
+	updateData := map[string]interface{}{
+		"document_uuid":   electronicDoc.DocumentUUID,
+		"estado":          electronicDoc.Estado,
+		"sunat_response":  electronicDoc.SunatResponse,
+		"observaciones":   electronicDoc.Observaciones,
+		"xml_url":         electronicDoc.XmlURL,
+		"cdr_url":         electronicDoc.CdrURL,
+		"pdf_url":         electronicDoc.PdfURL,
+		"facturacion_error": "",
 	}
-
-	config.DB.Save(&electronicDoc)
+	if err := config.DB.Model(&electronicDoc).Updates(updateData).Error; err != nil {
+		log.Printf("[Billing] Error updating doc %s-%s after emit: %v", electronicDoc.Serie, electronicDoc.Numero, err)
+	}
 
 	return &emitResp, nil
 }
-
 // ParseSunatResponse extracts human-readable notes from SUNAT XML/raw response
 func (s *BillingService) ParseSunatResponse(raw string) string {
 	if raw == "" {
@@ -1076,6 +1121,9 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 
 	// 3. Update Local Document
 	doc.Estado = statusResp.Status
+	if doc.Estado == "" {
+		doc.Estado = "pending"
+	}
 
 	// Process messages
 	sunatMsg := statusResp.SunatResponse
@@ -1100,6 +1148,9 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 		doc.CdrURL = statusResp.Files.CDR
 	}
 
+	log.Printf("[Billing] Sync Response for %s-%s: Status=%s, Msg=%s", 
+		doc.Serie, doc.Numero, doc.Estado, doc.SunatResponse)
+
 	// 4. Download/Extract from CDR if possible
 	if doc.CdrURL != "" {
 		cdrNotes, err := s.ExtractNotesFromCDR(doc.CdrURL)
@@ -1116,10 +1167,24 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 
 	// 5. Smart Status Detection (Fallback for inconsistent API status)
 	msgLower := strings.ToLower(doc.SunatResponse)
+	isAcceptedMsg := strings.Contains(msgLower, "aceptada") || 
+					 strings.Contains(msgLower, "aceptado") || 
+					 strings.Contains(msgLower, "exito") || 
+					 strings.Contains(msgLower, "éxito") ||
+					 doc.CdrURL != ""
+
+	isRejectedMsg := strings.Contains(msgLower, "rechazada") || 
+					 strings.Contains(msgLower, "rechazado") || 
+					 strings.Contains(msgLower, "error de datos")
+
 	if doc.Estado == "pending" || doc.Estado == "error" || doc.Estado == "" {
-		if strings.Contains(msgLower, "aceptada") || strings.Contains(msgLower, "ha sido aceptada") || doc.CdrURL != "" {
+		if isAcceptedMsg {
+			log.Printf("[Billing] Smart Detection (Sync): Upgrading %s-%s from '%s' to accepted", 
+				doc.Serie, doc.Numero, doc.Estado)
 			doc.Estado = "accepted"
-		} else if strings.Contains(msgLower, "rechazada") || strings.Contains(msgLower, "ha sido rechazada") {
+		} else if isRejectedMsg {
+			log.Printf("[Billing] Smart Detection (Sync): Upgrading %s-%s from '%s' to rejected", 
+				doc.Serie, doc.Numero, doc.Estado)
 			doc.Estado = "rejected"
 		}
 	}
@@ -1133,7 +1198,20 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 		doc.PdfURL = apiURL + "/api/v1/download/" + *doc.DocumentUUID + "/pdf"
 	}
 
-	config.DB.Save(doc)
+	// Use explicit updates to avoid GORM skipping empty fields or failing hooks
+	updateData := map[string]interface{}{
+		"estado":          doc.Estado,
+		"sunat_response":  doc.SunatResponse,
+		"observaciones":   doc.Observaciones,
+		"xml_url":         doc.XmlURL,
+		"cdr_url":         doc.CdrURL,
+		"pdf_url":           doc.PdfURL,
+		"facturacion_error": "",
+		}
+
+	if err := config.DB.Model(doc).Updates(updateData).Error; err != nil {
+		log.Printf("[Billing] Error updating synced doc %s-%s: %v", doc.Serie, doc.Numero, err)
+	}
 
 	// Return an EmitResponse compatible structure
 	return &EmitResponse{
