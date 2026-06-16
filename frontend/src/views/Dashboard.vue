@@ -1,271 +1,175 @@
 <template>
-  <div class="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-    <!-- Mobile Header (Visible only on small screens) -->
-    <header class="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-      <div class="flex items-center gap-2">
-        <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-200 shadow-lg">
-          <i class="pi pi-shield text-white text-sm"></i>
-        </div>
-        <h1 class="font-black text-sm tracking-tight text-slate-800 uppercase">ERP Core</h1>
-      </div>
-      <button @click="isSidebarOpen = !isSidebarOpen" class="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-all">
-        <i :class="isSidebarOpen ? 'pi pi-times' : 'pi pi-bars'"></i>
-      </button>
-    </header>
+  <div class="overlay" :class="{ show: isSidebarOpen }" @click="isSidebarOpen = false"></div>
 
-    <!-- Sidebar / Drawer -->
-    <aside 
-      :class="[
-        'fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-white flex flex-col shadow-2xl transition-transform duration-300 ease-in-out md:relative md:translate-x-0',
-        isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      ]"
-    >
-      <div class="p-6 border-b border-slate-800 hidden md:flex items-center gap-3">
-        <div class="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-          <i class="pi pi-shield text-white text-xl"></i>
-        </div>
-        <div>
-          <h1 class="font-black text-sm tracking-widest text-white uppercase">ERP Core</h1>
-          <p class="text-[10px] text-indigo-400 font-mono font-bold">v1.0.0 PREMIUM</p>
-        </div>
-      </div>
-
-      <!-- User Profile Card -->
-      <div class="p-6 border-b border-slate-800">
-        <div class="flex items-center gap-4">
-          <div class="relative">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-black text-lg shadow-lg">
-              {{ authStore.user?.nombre?.charAt(0) || 'U' }}
-            </div>
-            <span class="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>
-          </div>
-          <div class="overflow-hidden">
-            <h2 class="text-sm font-bold text-white truncate">{{ authStore.user?.nombre }}</h2>
-            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{{ authStore.user?.role_type }}</p>
+  <div class="app-layout">
+    <!-- ─── Sidebar ─── -->
+    <aside class="sidebar" :class="{ open: isSidebarOpen }">
+      <div class="sidebar-logo">
+        <div class="logo-row">
+          <div class="logo-mark"><i class="ti ti-shield-check"></i></div>
+          <div>
+            <div class="logo-text">ERP CORE</div>
+            <div class="logo-version">v1.0.0 PREMIUM</div>
           </div>
         </div>
       </div>
 
-      <!-- Navigation Menu -->
-      <nav class="flex-1 p-4 space-y-1.5 overflow-y-auto">
-        <p class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-4">Principal</p>
-        
-        <button 
-          v-if="!authStore.isCashier"
-          @click="selectSection('stats')" 
-          :class="[navBtnClass, currentSection === 'stats' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-chart-bar text-sm"></i>
-          <span>Dashboard</span>
-        </button>
+      <div class="user-card">
+        <div class="avatar">{{ authStore.user?.nombre?.charAt(0) || 'U' }}</div>
+        <div class="user-info">
+          <div class="user-name">{{ authStore.user?.nombre }}</div>
+          <div class="user-role">{{ authStore.user?.role_type }}</div>
+        </div>
+        <div class="online-dot"></div>
+      </div>
 
-        <button 
-          v-if="authStore.isCompanyAdmin"
-          @click="selectSection('branches')" 
-          :class="[navBtnClass, currentSection === 'branches' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-sitemap text-sm"></i>
-          <span>Sucursales</span>
-        </button>
+      <nav class="nav">
+        <div class="nav-section">
+          <div class="nav-label">PRINCIPAL</div>
+          
+          <div v-if="!authStore.isCashier" 
+               class="nav-item" :class="{ active: currentSection === 'stats' }"
+               @click="selectSection('stats')">
+            <i class="ti ti-chart-bar"></i><span>Dashboard</span>
+          </div>
+          
+          <div v-if="authStore.isCompanyAdmin"
+               class="nav-item" :class="{ active: currentSection === 'branches' }"
+               @click="selectSection('branches')">
+            <i class="ti ti-building-store"></i><span>Sucursales</span>
+          </div>
 
-        <button 
-          v-if="authStore.isCompanyAdmin || authStore.isBranchAdmin"
-          @click="selectSection('users')" 
-          :class="[navBtnClass, currentSection === 'users' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-users text-sm"></i>
-          <span>Personal y Roles</span>
-        </button>
+          <div v-if="authStore.isCompanyAdmin || authStore.isBranchAdmin"
+               class="nav-item" :class="{ active: currentSection === 'users' }"
+               @click="selectSection('users')">
+            <i class="ti ti-users"></i><span>Personal y Roles</span>
+          </div>
+        </div>
 
-        <p class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Inventario</p>
-        
-        <button 
-          v-if="authStore.isCompanyAdmin"
-          @click="selectSection('categories')" 
-          :class="[navBtnClass, currentSection === 'categories' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-tags text-sm"></i>
-          <span>Categorías</span>
-        </button>
-        
-        <button 
-          @click="selectSection('products')" 
-          :class="[navBtnClass, currentSection === 'products' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-box text-sm"></i>
-          <span>Productos</span>
-        </button>
-        
-        <button 
-          v-if="!authStore.isCashier"
-          @click="selectSection('kardex')" 
-          :class="[navBtnClass, currentSection === 'kardex' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-history text-sm"></i>
-          <span>Movimientos</span>
-        </button>
+        <div class="nav-section">
+          <div class="nav-label">INVENTARIO</div>
+          
+          <div v-if="authStore.isCompanyAdmin"
+               class="nav-item" :class="{ active: currentSection === 'categories' }"
+               @click="selectSection('categories')">
+            <i class="ti ti-tag"></i><span>Categorías</span>
+          </div>
+          
+          <div class="nav-item" :class="{ active: currentSection === 'products' }"
+               @click="selectSection('products')">
+            <i class="ti ti-box"></i><span>Productos</span>
+          </div>
 
-        <p class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Operaciones</p>
-        
-        <button 
-          v-if="authStore.isCompanyAdmin"
-          @click="selectSection('suppliers')" 
-          :class="[navBtnClass, currentSection === 'suppliers' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-truck text-sm"></i>
-          <span>Proveedores</span>
-        </button>
-        
-        <button 
-          v-if="!authStore.isCashier"
-          @click="selectSection('purchases')" 
-          :class="[navBtnClass, currentSection === 'purchases' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-shopping-cart text-sm"></i>
-          <span>Compras</span>
-        </button>
-        
-        <button 
-          @click="selectSection('customers')" 
-          :class="[navBtnClass, currentSection === 'customers' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-users text-sm"></i>
-          <span>Clientes</span>
-        </button>
-        
-        <button 
-          @click="selectSection('sales')" 
-          :class="[navBtnClass, currentSection === 'sales' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-desktop text-sm"></i>
-          <span>POS / Ventas</span>
-        </button>
+          <div v-if="!authStore.isCashier"
+               class="nav-item" :class="{ active: currentSection === 'kardex' }"
+               @click="selectSection('kardex')">
+            <i class="ti ti-arrows-exchange"></i><span>Movimientos</span>
+          </div>
+        </div>
 
-        <button 
-          @click="selectSection('cash')" 
-          :class="[navBtnClass, currentSection === 'cash' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-wallet text-sm"></i>
-          <span>Caja / Arqueo</span>
-        </button>
+        <div class="nav-section">
+          <div class="nav-label">OPERACIONES</div>
+          
+          <div v-if="authStore.isCompanyAdmin"
+               class="nav-item" :class="{ active: currentSection === 'suppliers' }"
+               @click="selectSection('suppliers')">
+            <i class="ti ti-truck"></i><span>Proveedores</span>
+          </div>
 
-        <!-- Sistema Section -->
-        <p v-if="authStore.isCompanyAdmin" class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-4 mb-2 mt-6">Sistema</p>
+          <div v-if="!authStore.isCashier"
+               class="nav-item" :class="{ active: currentSection === 'purchases' }"
+               @click="selectSection('purchases')">
+            <i class="ti ti-shopping-cart"></i><span>Compras</span>
+          </div>
 
-        <button 
-          v-if="authStore.isCompanyAdmin"
-          @click="selectSection('business')" 
-          :class="[navBtnClass, currentSection === 'business' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-building text-sm"></i>
-          <span>Configuración</span>
-        </button>
+          <div v-if="authStore.hasModule('facturacion')"
+               class="nav-item" :class="{ active: currentSection === 'documents' }"
+               @click="selectSection('documents', 'documents')">
+            <i class="ti ti-file-description"></i><span>Comprobantes</span>
+          </div>
 
-        <button 
-          v-if="authStore.isCompanyAdmin && authStore.hasModule('facturacion')"
-          @click="selectSection('billing')" 
-          :class="[navBtnClass, currentSection === 'billing' ? navBtnActive : navBtnInactive]"
-        >
-          <i class="pi pi-file-export text-sm"></i>
-          <span>Facturación</span>
-        </button>
+          <div class="nav-item" :class="{ active: currentSection === 'customers' }"
+               @click="selectSection('customers')">
+            <i class="ti ti-user-circle"></i><span>Clientes</span>
+          </div>
+
+          <div class="nav-item" :class="{ active: currentSection === 'sales' }"
+               @click="selectSection('sales')">
+            <i class="ti ti-device-desktop"></i><span>POS / Ventas</span>
+          </div>
+
+          <div class="nav-item" :class="{ active: currentSection === 'cash' }"
+               @click="selectSection('cash')">
+            <i class="ti ti-cash"></i><span>Caja / Arqueo</span>
+          </div>
+        </div>
+
+        <div v-if="authStore.isCompanyAdmin" class="nav-section">
+          <div class="nav-label">SISTEMA</div>
+          
+          <div class="nav-item" :class="{ active: currentSection === 'business' }"
+               @click="selectSection('business')">
+            <i class="ti ti-settings"></i><span>Configuración</span>
+          </div>
+
+          <div v-if="authStore.hasModule('facturacion')"
+               class="nav-item" :class="{ active: currentSection === 'billing' }"
+               @click="selectSection('billing', 'config')">
+            <i class="ti ti-file-invoice"></i><span>Facturación API</span>
+          </div>
+        </div>
       </nav>
 
-      <!-- Logout Footer -->
-      <div class="p-6 border-t border-slate-800">
-        <button
-          @click="handleLogout"
-          class="w-full flex items-center justify-center gap-2 py-3 px-4 bg-slate-800 hover:bg-red-900/40 text-slate-300 hover:text-red-200 rounded-xl text-xs font-black transition-all border border-slate-700 hover:border-red-900/50"
-        >
-          <i class="pi pi-sign-out"></i>
-          <span>CERRAR SESIÓN</span>
+      <div class="sidebar-footer">
+        <button @click="handleLogout" class="btn-logout">
+          <i class="ti ti-logout"></i>
+          <span>Cerrar Sesión</span>
         </button>
       </div>
     </aside>
 
-    <!-- Overlay for mobile sidebar -->
-    <div 
-      v-if="isSidebarOpen" 
-      @click="isSidebarOpen = false" 
-      class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden"
-    ></div>
-
-    <!-- Main Content Area -->
-    <main class="flex-1 flex flex-col min-w-0 pb-20 md:pb-0 overflow-y-auto max-h-screen">
-      <!-- Navbar / Top Header (Desktop Only) -->
-      <header class="hidden md:flex bg-white border-b border-slate-200 px-8 py-5 items-center justify-between sticky top-0 z-30">
-        <div class="flex items-center gap-6">
-          <div class="flex flex-col">
-            <h2 class="text-xl font-black text-slate-900 leading-tight">{{ companyName }}</h2>
-            <div class="flex items-center gap-2 mt-1">
-              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Sucursal Activa</p>
-            </div>
+    <!-- ─── Main ─── -->
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-btn" @click="isSidebarOpen = true"><i class="ti ti-menu-2"></i></button>
+        <div class="topbar-left">
+          <div class="topbar-title">{{ companyName }}</div>
+          <div class="topbar-sub">
+            <div class="branch-dot"></div>
+            <span class="branch-label">Sucursal activa</span>
           </div>
         </div>
-        
-        <div class="flex items-center gap-4">
+        <div class="topbar-right">
           <BranchSelector />
-          <div class="h-8 w-px bg-slate-200 mx-2"></div>
-          <div class="flex flex-col items-end">
-            <p class="text-[9px] text-slate-400 font-black uppercase tracking-tighter">Plan de Servicio</p>
-            <p class="text-xs font-black text-indigo-600">PROFESSIONAL SAAS</p>
-          </div>
+          <div class="plan-chip">PROFESSIONAL SAAS</div>
         </div>
       </header>
 
-      <!-- Page Title (Mobile) -->
-      <div class="md:hidden px-4 pt-6 pb-2">
-        <h2 class="text-2xl font-black text-slate-900">{{ getSectionLabel(currentSection) }}</h2>
-      </div>
-
-      <!-- Content Views -->
-      <section class="p-4 md:p-8 flex-1 animate-fade-in">
-        <StatsSection v-if="currentSection === 'stats'" @navigate="currentSection = $event" />
+      <div class="content-view">
+        <StatsSection v-if="currentSection === 'stats'" @navigate="selectSection($event)" />
         <CategoriesSection v-if="currentSection === 'categories'" />
         <ProductsSection v-if="currentSection === 'products'" />
         <CustomersSection v-if="currentSection === 'customers'" />
         <SuppliersSection v-if="currentSection === 'suppliers'" />
         <PurchasesSection v-if="currentSection === 'purchases'" />
         <KardexSection v-if="currentSection === 'kardex'" />
-        <SalesSection v-if="currentSection === 'sales'" @navigate="currentSection = $event" />
+        <SalesSection v-if="currentSection === 'sales'" @navigate="selectSection($event)" />
         <CashSection v-if="currentSection === 'cash'" />
-        <BillingSection v-if="currentSection === 'billing'" />
+        <BillingSection v-if="currentSection === 'billing' || currentSection === 'documents'" 
+                        :initialTab="currentBillingTab" 
+                        :key="currentBillingTab"
+                        @tabChange="handleBillingTabChange" />
         <BusinessSection v-if="currentSection === 'business'" />
         <BranchesSection v-if="currentSection === 'branches'" />
         <UsersSection v-if="currentSection === 'users'" />
-      </section>
-
-      <!-- Mobile Bottom Tab Bar -->
-      <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-3 flex items-center justify-around z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <button @click="selectSection('stats')" :class="['flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300', currentSection === 'stats' ? 'text-indigo-600 transform -translate-y-1' : 'text-slate-400']">
-          <i class="pi pi-home text-xl"></i>
-          <span v-if="currentSection === 'stats'" class="w-1 h-1 bg-indigo-600 rounded-full mt-1"></span>
-        </button>
-        <button @click="selectSection('products')" :class="['flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300', currentSection === 'products' ? 'text-indigo-600 transform -translate-y-1' : 'text-slate-400']">
-          <i class="pi pi-box text-xl"></i>
-          <span v-if="currentSection === 'products'" class="w-1 h-1 bg-indigo-600 rounded-full mt-1"></span>
-        </button>
-        <button @click="selectSection('sales')" :class="['flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300', currentSection === 'sales' ? 'text-indigo-600 transform -translate-y-1' : 'text-slate-400']">
-          <i class="pi pi-desktop text-xl"></i>
-          <span v-if="currentSection === 'sales'" class="w-1 h-1 bg-indigo-600 rounded-full mt-1"></span>
-        </button>
-        <button @click="selectSection('customers')" :class="['flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300', currentSection === 'customers' ? 'text-indigo-600 transform -translate-y-1' : 'text-slate-400']">
-          <i class="pi pi-users text-xl"></i>
-          <span v-if="currentSection === 'customers'" class="w-1 h-1 bg-indigo-600 rounded-full mt-1"></span>
-        </button>
-        <button @click="isSidebarOpen = true" class="flex flex-col items-center justify-center p-2 rounded-2xl text-slate-400">
-          <i class="pi pi-bars text-xl"></i>
-        </button>
-      </nav>
+      </div>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useAuthStore } from '../store/auth'
-import axios from 'axios'
 
 // Component Sections
 import StatsSection from '../components/StatsSection.vue'
@@ -284,71 +188,222 @@ import UsersSection from '../components/UsersSection.vue'
 import BranchSelector from '../components/BranchSelector.vue'
 
 const authStore = useAuthStore()
-const currentSection = ref('stats')
+const currentSection = ref(localStorage.getItem('erp_last_section') || (authStore.isCashier ? 'sales' : 'stats'))
+const currentBillingTab = ref(localStorage.getItem('erp_last_billing_tab') || (currentSection.value === 'documents' ? 'documents' : 'config'))
 const isSidebarOpen = ref(false)
 
 const companyName = computed(() => authStore.user?.company?.nombre_comercial || 'Mi Empresa')
 
-// CSS Classes for cleaner template
-const navBtnClass = 'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold tracking-tight transition-all duration-200'
-const navBtnActive = 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 transform scale-[1.02]'
-const navBtnInactive = 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-
 onMounted(async () => {
   await authStore.fetchUser()
+  // Ensure cashier doesn't stay in restricted sections on refresh
+  if (authStore.isCashier && !['sales', 'cash', 'customers', 'products'].includes(currentSection.value)) {
+    currentSection.value = 'sales'
+  }
 })
 
-function selectSection(section: string) {
+function selectSection(section: string, billingTab: string = 'config') {
   currentSection.value = section
+  currentBillingTab.value = billingTab
+  localStorage.setItem('erp_last_section', section)
+  
+  // Persist billing tab if we're in billing/documents
+  if (section === 'billing' || section === 'documents') {
+    localStorage.setItem('erp_last_billing_tab', billingTab)
+  }
+  
   isSidebarOpen.value = false
 }
 
-function getSectionLabel(section: string) {
-  const labels: any = {
-    'stats': 'Dashboard',
-    'branches': 'Sucursales',
-    'categories': 'Categorías',
-    'products': 'Productos',
-    'kardex': 'Movimientos',
-    'suppliers': 'Proveedores',
-    'purchases': 'Compras',
-    'customers': 'Clientes',
-    'sales': 'Ventas / POS',
-    'cash': 'Caja / Arqueo',
-    'billing': 'Facturación Electrónica',
-    'business': 'Configuración del Negocio',
-    'users': 'Personal y Roles'
-  }
-  return labels[section] || 'Inicio'
+function handleBillingTabChange(tab: string) {
+  currentBillingTab.value = tab
+  localStorage.setItem('erp_last_billing_tab', tab)
 }
 
 function handleLogout() {
+  localStorage.removeItem('erp_last_section')
+  localStorage.removeItem('erp_last_billing_tab')
   authStore.logout()
 }
 </script>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-
 :root {
-  font-family: 'Inter', sans-serif;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface2: #f1f5f9;
+  --border: rgba(0,0,0,0.06);
+  --border-hover: rgba(0,0,0,0.1);
+  --accent: #4f46e5;
+  --accent-dim: rgba(79, 70, 229, 0.1);
+  --accent-hover: #4338ca;
+  --green: #10b981;
+  --green-dim: rgba(16, 185, 129, 0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
+  --amber: #f59e0b;
+  --amber-dim: rgba(245, 158, 11, 0.12);
+  --text: #0f172a;
+  --text2: #64748b;
+  --text3: #94a3b8;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-w: 240px;
+  --transition: 0.18s ease;
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
+/* Sidebar context */
+.sidebar {
+  --surface: #0f172a;
+  --surface2: #1e293b;
+  --text: #f8fafc;
+  --text2: #94a3b8;
+  --text3: #475569;
+  --border: rgba(255,255,255,0.05);
+  --accent: #6366f1;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
 }
 
-/* Custom scrollbar for sidebar */
-aside::-webkit-scrollbar {
-  width: 4px;
+/* ─── Layout ─── */
+.app-layout { display: flex; height: 100vh; overflow: hidden; }
+
+/* ─── Sidebar ─── */
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--transition);
+  z-index: 100;
 }
-aside::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 10px;
+
+.sidebar-logo {
+  padding: 22px 18px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.logo-row { display: flex; align-items: center; gap: 10px; }
+.logo-mark {
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 15px;
+  flex-shrink: 0;
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.4);
+}
+.logo-text { font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: var(--text); }
+.logo-version { font-size: 10px; color: var(--accent); letter-spacing: 0.08em; margin-top: 1px; }
+
+.user-card {
+  padding: 14px 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--accent-dim);
+  border: 1.5px solid var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  flex-shrink: 0;
+}
+.user-info { flex: 1; min-width: 0; }
+.user-name { font-size: 12.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-role { font-size: 10px; color: var(--text2); letter-spacing: 0.06em; }
+.online-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px var(--green); }
+
+.nav { flex: 1; overflow-y: auto; padding: 12px 10px; }
+.nav::-webkit-scrollbar { width: 4px; }
+.nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.nav-section { margin-bottom: 20px; }
+.nav-label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.14em;
+  color: var(--text3); padding: 0 8px 8px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px; border-radius: var(--radius-sm);
+  color: var(--text2); font-size: 13px; cursor: pointer;
+  transition: all var(--transition);
+  margin-bottom: 2px;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+.nav-item i { font-size: 16px; flex-shrink: 0; }
+
+.sidebar-footer {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+.btn-logout {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text2); font-family: inherit;
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: all var(--transition);
+}
+.btn-logout:hover { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+
+/* ─── Main ─── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; background: var(--bg); }
+
+.topbar {
+  padding: 14px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 14px;
+  flex-shrink: 0;
+}
+.topbar-left { flex: 1; min-width: 0; }
+.topbar-title { font-size: 18px; font-weight: 800; color: var(--text); }
+.topbar-sub { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.branch-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.branch-label { font-size: 10px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.plan-chip {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(79, 70, 229, 0.2);
+  font-size: 10px; font-weight: 700;
+  padding: 4px 10px; border-radius: 20px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.menu-btn {
+  display: none; background: none; border: none; color: var(--text2);
+  font-size: 22px; cursor: pointer; padding: 4px; line-height: 1;
+}
+
+.content-view { flex: 1; overflow-y: auto; padding: 24px; }
+.content-view::-webkit-scrollbar { width: 6px; }
+.content-view::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 10px; }
+
+/* Overlay */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 99; backdrop-filter: blur(4px); }
+.overlay.show { display: block; }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; z-index: 150;
+    width: 260px; transform: translateX(-100%);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .menu-btn { display: block; }
+  .topbar-right { display: none; }
+  .content-view { padding: 16px; }
 }
 </style>

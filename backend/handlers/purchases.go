@@ -1,7 +1,16 @@
 package handlers
 
 import (
+	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,13 +26,16 @@ type PurchaseItemInput struct {
 }
 
 type CreatePurchaseInput struct {
-	SupplierID uuid.UUID            `json:"supplier_id" binding:"required"`
-	Items      []PurchaseItemInput  `json:"items" binding:"required,gt=0"`
+	SupplierID        uuid.UUID            `json:"supplier_id" binding:"required"`
+	Items             []PurchaseItemInput  `json:"items" binding:"required,gt=0"`
+	Estado            string               `json:"estado"`
+	TipoComprobante   string               `json:"tipo_comprobante"`
+	NumeroComprobante string               `json:"numero_comprobante"`
 }
 
 func GetPurchases(c *gin.Context) {
 	var purchases []models.Purchase
-	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Order("created_at desc").Find(&purchases).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Preload("Attachments").Order("created_at desc").Find(&purchases).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -39,7 +51,7 @@ func GetPurchaseDetails(c *gin.Context) {
 	}
 
 	var purchase models.Purchase
-	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Where("id = ?", id).First(&purchase).Error; err != nil {
+	if err := config.DB.Scopes(config.BranchFilter(c)).Preload("Supplier").Preload("Attachments").Where("id = ?", id).First(&purchase).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Purchase not found"})
 		return
 	}
@@ -95,16 +107,23 @@ func CreatePurchase(c *gin.Context) {
 	subtotal := total / 1.18
 	igv := total - subtotal
 
+	estado := "completed"
+	if input.Estado != "" {
+		estado = input.Estado
+	}
+
 	// 2. Create Purchase Header
 	purchase := models.Purchase{
-		CompanyID:  companyID,
-		BranchID:   branchID,
-		SupplierID: input.SupplierID,
-		Fecha:      time.Now(),
-		Subtotal:   subtotal,
-		IGV:        igv,
-		Total:      total,
-		Estado:     "completed", // Auto-complete purchases
+		CompanyID:         companyID,
+		BranchID:          branchID,
+		SupplierID:        input.SupplierID,
+		Fecha:             time.Now(),
+		Subtotal:          subtotal,
+		IGV:               igv,
+		Total:             total,
+		Estado:            estado,
+		TipoComprobante:   input.TipoComprobante,
+		NumeroComprobante: input.NumeroComprobante,
 	}
 
 	if err := tx.Create(&purchase).Error; err != nil {
@@ -183,4 +202,303 @@ func CreatePurchase(c *gin.Context) {
 
 	tx.Commit()
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": purchase})
+}
+
+func UpdatePurchase(c *gin.Context) {
+	companyID := c.MustGet("companyID").(uuid.UUID)
+
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de compra inválido"})
+		return
+	}
+
+	var purchase models.Purchase
+	if err := config.DB.Preload("Supplier").Where("id = ? AND company_id = ?", id, companyID).First(&purchase).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Compra no encontrada"})
+		return
+	}
+
+	// Read form values
+	supplierIDStr := c.PostForm("supplier_id")
+	if supplierIDStr != "" {
+		if supplierID, err := uuid.Parse(supplierIDStr); err == nil {
+			purchase.SupplierID = supplierID
+			// Reload Supplier model if it has changed to keep RUC in sync
+			var newSupplier models.Supplier
+			if err := config.DB.Where("id = ? AND company_id = ?", supplierID, companyID).First(&newSupplier).Error; err == nil {
+				purchase.Supplier = newSupplier
+			}
+		}
+	}
+
+	fechaStr := c.PostForm("fecha")
+	if fechaStr != "" {
+		if t, err := time.Parse(time.RFC3339, fechaStr); err == nil {
+			purchase.Fecha = t
+		} else if t, err := time.Parse("2006-01-02", fechaStr); err == nil {
+			purchase.Fecha = t
+		}
+	}
+
+	estado := c.PostForm("estado")
+	if estado != "" {
+		purchase.Estado = estado
+	}
+
+	tipoComprobante := c.PostForm("tipo_comprobante")
+	if tipoComprobante != "" {
+		purchase.TipoComprobante = tipoComprobante
+	}
+
+	numeroComprobante := c.PostForm("numero_comprobante")
+	if numeroComprobante != "" {
+		purchase.NumeroComprobante = numeroComprobante
+	}
+
+	// Handle file upload
+	file, err := c.FormFile("file")
+	if err == nil {
+		// Ensure uploads directory exists
+		uploadDir := "./uploads/purchases"
+		if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo crear la carpeta de subidas"})
+			return
+		}
+
+		filename := generateProfessionalFilename(purchase, id, file.Filename, "", "")
+		dst := filepath.Join(uploadDir, filename)
+
+		// Check if it's an image
+		ext := strings.ToLower(filepath.Ext(file.Filename))
+		isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
+
+		if isImage {
+			fileReader, err := file.Open()
+			if err == nil {
+				defer fileReader.Close()
+				if err := compressAndSaveImage(fileReader, dst); err != nil {
+					_ = c.SaveUploadedFile(file, dst)
+				}
+			} else {
+				_ = c.SaveUploadedFile(file, dst)
+			}
+		} else {
+			if err := c.SaveUploadedFile(file, dst); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo guardar el archivo"})
+				return
+			}
+		}
+
+		purchase.ComprobanteUrl = "/uploads/purchases/" + filename
+	}
+
+	if err := config.DB.Save(&purchase).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo actualizar la compra"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": purchase})
+}
+
+// Helper to compress images (JPEG, PNG, GIF) to JPEG with 75% quality settings
+func compressAndSaveImage(src io.Reader, dstPath string) error {
+	img, _, err := image.Decode(src)
+	if err != nil {
+		return err
+	}
+
+	out, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// 75% quality is visually indistinguishable for documents and yields ~80% space saving
+	return jpeg.Encode(out, img, &jpeg.Options{Quality: 75})
+}
+
+func UploadPurchaseAttachment(c *gin.Context) {
+	companyID := c.MustGet("companyID").(uuid.UUID)
+
+	purchaseIDStr := c.Param("id")
+	purchaseID, err := uuid.Parse(purchaseIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de compra inválido"})
+		return
+	}
+
+	// Verify purchase belongs to this company and preload supplier to generate professional name
+	var purchase models.Purchase
+	if err := config.DB.Preload("Supplier").Where("id = ? AND company_id = ?", purchaseID, companyID).First(&purchase).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Compra no encontrada"})
+		return
+	}
+
+	// Parse file
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "No se recibió ningún archivo"})
+		return
+	}
+
+	// Ensure upload dir exists
+	uploadDir := "./uploads/purchases"
+	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo crear la carpeta de subidas"})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	attachmentID := uuid.New()
+
+	tipoDoc := c.PostForm("tipo_documento")
+	numDoc := c.PostForm("numero_documento")
+	descripcion := c.PostForm("descripcion")
+
+	// Generate professional safe filename
+	finalFilename := generateProfessionalFilename(purchase, attachmentID, file.Filename, tipoDoc, numDoc)
+	dstPath := filepath.Join(uploadDir, finalFilename)
+
+	// Determine if it is an image to compress
+	isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
+	var relativeUrl string
+
+	if isImage {
+		fileReader, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo abrir el archivo subido"})
+			return
+		}
+		defer fileReader.Close()
+
+		if err := compressAndSaveImage(fileReader, dstPath); err != nil {
+			// Fallback to normal upload if compression fails
+			if err := c.SaveUploadedFile(file, dstPath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo guardar la imagen"})
+				return
+			}
+		}
+		relativeUrl = "/uploads/purchases/" + finalFilename
+	} else {
+		// Normal upload (e.g. PDF)
+		if err := c.SaveUploadedFile(file, dstPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo guardar el archivo"})
+			return
+		}
+		relativeUrl = "/uploads/purchases/" + finalFilename
+	}
+
+	// Save attachment to DB
+	attachment := models.PurchaseAttachment{
+		PurchaseID:  purchaseID,
+		Nombre:      finalFilename,
+		Url:         relativeUrl,
+		Descripcion: descripcion,
+	}
+	attachment.ID = attachmentID
+
+	if err := config.DB.Create(&attachment).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo registrar el adjunto en base de datos"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": attachment})
+}
+
+func DeletePurchaseAttachment(c *gin.Context) {
+	companyID := c.MustGet("companyID").(uuid.UUID)
+
+	purchaseIDStr := c.Param("id")
+	purchaseID, err := uuid.Parse(purchaseIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de compra inválido"})
+		return
+	}
+
+	attachmentIDStr := c.Param("attachmentId")
+	attachmentID, err := uuid.Parse(attachmentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de adjunto inválido"})
+		return
+	}
+
+	// Verify purchase belongs to this company
+	var purchase models.Purchase
+	if err := config.DB.Where("id = ? AND company_id = ?", purchaseID, companyID).First(&purchase).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Compra no encontrada"})
+		return
+	}
+
+	// Find the attachment
+	var attachment models.PurchaseAttachment
+	if err := config.DB.Where("id = ? AND purchase_id = ?", attachmentID, purchaseID).First(&attachment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Adjunto no encontrado"})
+		return
+	}
+
+	// Delete file from disk if it exists
+	localPath := "." + attachment.Url
+	if _, err := os.Stat(localPath); err == nil {
+		_ = os.Remove(localPath)
+	}
+
+	// Delete record from DB
+	if err := config.DB.Delete(&attachment).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo eliminar el registro del adjunto"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Adjunto eliminado con éxito"})
+}
+
+func generateProfessionalFilename(purchase models.Purchase, id uuid.UUID, originalName string, customTipo string, customNumero string) string {
+	ext := strings.ToLower(filepath.Ext(originalName))
+
+	tipo := "COMPROBANTE"
+	if customTipo != "" {
+		tipo = strings.ToUpper(customTipo)
+	} else if purchase.TipoComprobante != "" {
+		tipo = strings.ToUpper(purchase.TipoComprobante)
+	}
+	tipo = sanitizeString(tipo)
+
+	ruc := "NO-RUC"
+	if purchase.Supplier.RUC != "" {
+		ruc = purchase.Supplier.RUC
+	}
+
+	numero := "S-N"
+	if customNumero != "" {
+		numero = strings.ToUpper(customNumero)
+	} else if purchase.NumeroComprobante != "" {
+		numero = strings.ToUpper(purchase.NumeroComprobante)
+	}
+	numero = sanitizeString(numero)
+
+	fecha := "NO-FECHA"
+	if !purchase.Fecha.IsZero() {
+		fecha = purchase.Fecha.Format("2006-01-02")
+	}
+
+	monto := fmt.Sprintf("%.2f", purchase.Total)
+
+	suffix := id.String()[:4]
+
+	// Format: TIPO_RUC-XXX_NUM-XXX_FECHA-XXX_MONTO-XXX_SUF.ext
+	filename := fmt.Sprintf("%s_RUC-%s_NUM-%s_FECHA-%s_MONTO-%s_%s%s", tipo, ruc, numero, fecha, monto, suffix, ext)
+	return filename
+}
+
+func sanitizeString(s string) string {
+	var result strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		} else if r == ' ' || r == '/' || r == '\\' {
+			result.WriteRune('-')
+		}
+	}
+	return result.String()
 }

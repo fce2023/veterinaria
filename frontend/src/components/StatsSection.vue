@@ -1,131 +1,82 @@
 <template>
-  <div class="space-y-8 animate-fade-in">
-    <!-- Top Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <!-- Sales Today Card -->
-      <div class="bg-gradient-to-tr from-sky-600 to-indigo-600 p-6 rounded-2xl text-white shadow-md flex items-center justify-between border border-sky-500/20">
-        <div>
-          <p class="text-xs font-bold text-sky-100 uppercase tracking-wider">Ventas de Hoy</p>
-          <h3 class="text-3xl font-black mt-1 font-mono">S/. {{ stats.sales_today.toFixed(2) }}</h3>
-          <p class="text-[10px] text-sky-200 mt-1"><i class="pi pi-calendar mr-1"></i>Día actual</p>
-        </div>
-        <div class="w-12 h-12 bg-white/10 text-white rounded-xl flex items-center justify-center text-xl">
-          <i class="pi pi-bolt"></i>
+  <div class="stats-container animate-fade-in">
+    <!-- Top Statistics Strip -->
+    <div class="stats-strip">
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="ti ti-trending-up"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Ventas Hoy</div>
+          <div class="stat-value">S/. {{ stats.sales_today.toFixed(2) }}</div>
         </div>
       </div>
-
-      <!-- Sales Month Card -->
-      <div class="bg-gradient-to-tr from-emerald-600 to-teal-600 p-6 rounded-2xl text-white shadow-md flex items-center justify-between border border-emerald-500/20">
-        <div>
-          <p class="text-xs font-bold text-emerald-100 uppercase tracking-wider">Ventas del Mes</p>
-          <h3 class="text-3xl font-black mt-1 font-mono">S/. {{ stats.sales_month.toFixed(2) }}</h3>
-          <p class="text-[10px] text-emerald-200 mt-1"><i class="pi pi-chart-line mr-1"></i>Mes actual</p>
-        </div>
-        <div class="w-12 h-12 bg-white/10 text-white rounded-xl flex items-center justify-center text-xl">
-          <i class="pi pi-percentage"></i>
+      <div class="stat-card">
+        <div class="stat-icon accent"><i class="ti ti-chart-dots"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Ventas Mes</div>
+          <div class="stat-value">S/. {{ stats.sales_month.toFixed(2) }}</div>
         </div>
       </div>
-
-      <!-- Purchases Month Card -->
-      <div class="bg-gradient-to-tr from-rose-600 to-orange-600 p-6 rounded-2xl text-white shadow-md flex items-center justify-between border border-rose-500/20">
-        <div>
-          <p class="text-xs font-bold text-rose-100 uppercase tracking-wider">Compras del Mes</p>
-          <h3 class="text-3xl font-black mt-1 font-mono">S/. {{ stats.purchases_month.toFixed(2) }}</h3>
-          <p class="text-[10px] text-rose-200 mt-1"><i class="pi pi-shopping-bag mr-1"></i>Egresos mes</p>
-        </div>
-        <div class="w-12 h-12 bg-white/10 text-white rounded-xl flex items-center justify-center text-xl">
-          <i class="pi pi-wallet"></i>
+      <div class="stat-card">
+        <div class="stat-icon red"><i class="ti ti-shopping-cart-x"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Compras Mes</div>
+          <div class="stat-value">S/. {{ stats.purchases_month.toFixed(2) }}</div>
         </div>
       </div>
-
-      <!-- Low Stock Warning Card -->
-      <div :class="['p-6 rounded-2xl shadow-md flex items-center justify-between border transition-all',
-        stats.low_stock_count > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-white border-slate-200 text-slate-800']">
-        <div>
-          <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Stock Crítico</p>
-          <h3 class="text-3xl font-black mt-1 font-mono" :class="stats.low_stock_count > 0 ? 'text-amber-700' : 'text-slate-800'">
-            {{ stats.low_stock_count }}
-          </h3>
-          <p class="text-[10px] mt-1" :class="stats.low_stock_count > 0 ? 'text-amber-600 font-semibold' : 'text-slate-400'">
-            <i class="pi pi-exclamation-triangle mr-1"></i>{{ stats.low_stock_count > 0 ? '¡Productos bajo mínimo!' : 'Inventario estable' }}
-          </p>
-        </div>
-        <div :class="['w-12 h-12 rounded-xl flex items-center justify-center text-xl',
-          stats.low_stock_count > 0 ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500']">
-          <i class="pi pi-box"></i>
+      <div class="stat-card" :class="{ warning: stats.low_stock_count > 0 }">
+        <div class="stat-icon amber"><i class="ti ti-alert-triangle"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Stock Crítico</div>
+          <div class="stat-value">{{ stats.low_stock_count }} prod.</div>
         </div>
       </div>
     </div>
 
-    <!-- Main Content Area: Left (Top products), Right (Quick actions) -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- Main Content Area -->
+    <div class="stats-grid">
       <!-- Top Selling Products -->
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2 flex flex-col justify-between">
-        <div>
-          <h3 class="text-base font-extrabold text-slate-800 border-b border-slate-100 pb-3 mb-6">
-            Productos Más Vendidos
-          </h3>
-
-          <div class="space-y-5">
-            <div v-for="(prod, idx) in stats.top_products" :key="idx" class="space-y-2">
-              <div class="flex justify-between items-center text-xs">
-                <div>
-                  <span class="font-bold text-slate-800">{{ prod.nombre }}</span>
-                  <span v-if="prod.codigo" class="text-[10px] font-mono text-slate-400 ml-2">({{ prod.codigo }})</span>
-                </div>
-                <span class="font-mono font-bold text-slate-900">{{ prod.cantidad }} und.</span>
-              </div>
-              <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                <div
-                  class="bg-gradient-to-r from-sky-500 to-indigo-500 h-full rounded-full transition-all duration-500"
-                  :style="{ width: `${calculatePercentage(prod.cantidad)}%` }"
-                ></div>
-              </div>
-            </div>
-            
-            <div v-if="stats.top_products.length === 0" class="text-center py-12 text-slate-400">
-              <i class="pi pi-chart-bar text-3xl block mb-2 text-slate-300"></i>
-              No hay datos de ventas para este periodo.
-            </div>
-          </div>
+      <div class="glass-card main-stats">
+        <div class="card-head">
+          <h3 class="card-title">Productos más vendidos</h3>
+          <p class="card-subtitle">Basado en unidades totales</p>
         </div>
 
-        <div class="text-[10px] text-slate-400 mt-6 text-right">
-          * Basado en la cantidad total de unidades vendidas en la sucursal actual.
+        <div class="top-list">
+          <div v-for="(prod, idx) in stats.top_products" :key="idx" class="top-item">
+            <div class="top-info">
+              <span class="top-name">{{ prod.nombre }}</span>
+              <span class="top-qty">{{ prod.cantidad }} und.</span>
+            </div>
+            <div class="progress-bg">
+              <div class="progress-bar" :style="{ width: `${calculatePercentage(prod.cantidad)}%` }"></div>
+            </div>
+          </div>
+          
+          <div v-if="stats.top_products.length === 0" class="empty-list">
+            <i class="ti ti-chart-bar"></i>
+            <p>No hay datos disponibles</p>
+          </div>
         </div>
       </div>
 
-      <!-- Quick Action Shortcuts -->
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col justify-between h-fit">
-        <div>
-          <h3 class="text-base font-extrabold text-slate-800 border-b border-slate-100 pb-3 mb-4">
-            Accesos Rápidos
-          </h3>
-          <p class="text-xs text-slate-500 mb-6">Operaciones comunes disponibles en el sistema:</p>
-
-          <div class="grid grid-cols-1 gap-3">
-            <button
-              @click="$emit('navigate', 'sales')"
-              class="w-full p-3 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-850 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between group"
-            >
-              <span class="flex items-center gap-3"><i class="pi pi-desktop text-sky-600 text-sm"></i>Punto de Venta (POS)</span>
-              <i class="pi pi-arrow-right text-[10px] group-hover:translate-x-1 transition-all"></i>
-            </button>
-            <button
-              @click="$emit('navigate', 'purchases')"
-              class="w-full p-3 bg-emerald-55/10 hover:bg-emerald-50 border border-emerald-200 text-emerald-850 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between group"
-            >
-              <span class="flex items-center gap-3"><i class="pi pi-shopping-cart text-emerald-600 text-sm"></i>Registrar Compra</span>
-              <i class="pi pi-arrow-right text-[10px] group-hover:translate-x-1 transition-all"></i>
-            </button>
-            <button
-              @click="$emit('navigate', 'kardex')"
-              class="w-full p-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-850 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between group"
-            >
-              <span class="flex items-center gap-3"><i class="pi pi-history text-indigo-650 text-sm"></i>Ver Kardex / Stock</span>
-              <i class="pi pi-arrow-right text-[10px] group-hover:translate-x-1 transition-all"></i>
-            </button>
-          </div>
+      <!-- Quick Actions -->
+      <div class="glass-card side-stats">
+        <div class="card-head">
+          <h3 class="card-title">Accesos Rápidos</h3>
+        </div>
+        <div class="actions-list">
+          <button @click="$emit('navigate', 'sales')" class="action-btn">
+            <div class="action-icon"><i class="ti ti-device-desktop"></i></div>
+            <span>Punto de Venta (POS)</span>
+          </button>
+          <button @click="$emit('navigate', 'purchases')" class="action-btn">
+            <div class="action-icon"><i class="ti ti-shopping-cart"></i></div>
+            <span>Registrar Compra</span>
+          </button>
+          <button @click="$emit('navigate', 'kardex')" class="action-btn">
+            <div class="action-icon"><i class="ti ti-arrows-exchange"></i></div>
+            <span>Movimientos / Stock</span>
+          </button>
         </div>
       </div>
     </div>
@@ -133,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { onMounted, reactive } from 'vue'
 import axios from 'axios'
 
 const stats = reactive({
@@ -167,3 +118,54 @@ function calculatePercentage(qty: number) {
   return (qty / maxQty) * 100
 }
 </script>
+
+<style scoped>
+.stats-container { display: flex; flex-direction: column; gap: 24px; }
+
+.stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px; display: flex; align-items: center; gap: 16px; transition: all var(--transition);
+}
+.stat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.stat-card.warning { border-color: var(--amber); background: var(--amber-dim); }
+
+.stat-icon {
+  width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.stat-icon.green { background: var(--green-dim); color: var(--green); }
+.stat-icon.accent { background: var(--accent-dim); color: var(--accent); }
+.stat-icon.red { background: var(--red-dim); color: var(--red); }
+.stat-icon.amber { background: var(--amber-dim); color: var(--amber); }
+
+.stat-label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-value { font-size: 18px; font-weight: 900; color: var(--text); margin-top: 2px; }
+
+.stats-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .stats-grid { grid-template-columns: 1fr; } }
+
+.glass-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.card-head { padding: 24px; border-bottom: 1px solid var(--border); }
+.card-title { font-size: 16px; font-weight: 800; color: var(--text); }
+.card-subtitle { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+.top-list { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.top-item { display: flex; flex-direction: column; gap: 8px; }
+.top-info { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; }
+.top-qty { color: var(--accent); }
+.progress-bg { width: 100%; height: 6px; background: var(--surface2); border-radius: 10px; overflow: hidden; }
+.progress-bar { height: 100%; background: var(--accent); border-radius: 10px; transition: width 0.8s ease-out; }
+
+.actions-list { padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+.action-btn {
+  width: 100%; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface2); display: flex; align-items: center; gap: 12px;
+  cursor: pointer; transition: all var(--transition); font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+}
+.action-btn:hover { border-color: var(--accent); background: var(--surface); color: var(--accent); }
+.action-icon { font-size: 18px; color: var(--text3); }
+.action-btn:hover .action-icon { color: var(--accent); }
+
+.empty-list { text-align: center; padding: 40px 0; color: var(--text3); }
+.empty-list i { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+</style>

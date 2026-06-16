@@ -3,68 +3,97 @@
     <!-- Form -->
     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 h-fit">
       <h3 class="text-base font-extrabold text-slate-800 border-b border-slate-100 pb-3 flex items-center gap-2">
-        <i class="pi pi-plus text-purple-600"></i>
+        <i class="ti ti-user-plus text-indigo-600"></i>
         <span>{{ editId ? 'Editar Cliente' : 'Nuevo Cliente' }}</span>
       </h3>
-      <form @submit.prevent="handleSubmit" class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1.5">Tipo Doc.</label>
+      <form @submit.prevent="handleSubmit" class="customer-form space-y-4">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="field-label">Tipo Doc.</label>
             <select
               v-model="form.tipo_documento"
               required
-              class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 focus:outline-none transition-all"
+              class="modal-select"
             >
               <option value="DNI">DNI</option>
               <option value="RUC">RUC</option>
               <option value="CE">C.E.</option>
             </select>
           </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1.5">Nº Documento</label>
-            <input
-              v-model="form.numero_documento"
-              type="text"
-              required
-              class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 focus:outline-none transition-all"
-              placeholder="Ej. 70123456"
-            />
+          <div class="form-group" style="flex: 2;">
+            <label class="field-label">N° Documento</label>
+            <div class="input-search-group">
+              <input
+                v-model="form.numero_documento"
+                type="text"
+                required
+                maxlength="11"
+                class="modal-input"
+                placeholder="8 o 11 dígitos"
+                @keyup.enter="searchDocument"
+              />
+              <button 
+                type="button" 
+                @click="searchDocument"
+                class="btn-search-api"
+                :disabled="searchingApi"
+                title="Consultar en SUNAT/RENIEC"
+              >
+                <i v-if="searchingApi" class="ti ti-loader animate-spin"></i>
+                <i v-else class="ti ti-search"></i>
+              </button>
+            </div>
           </div>
         </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-600 mb-1.5">Nombres / Razón Social</label>
+
+        <div class="form-group">
+          <label class="field-label">Nombre / Razón Social</label>
           <input
             v-model="form.nombre"
             type="text"
             required
-            class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 focus:outline-none transition-all"
-            placeholder="Ej. Juan Pérez Celis"
+            class="modal-input"
+            placeholder="Nombre completo"
           />
         </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-600 mb-1.5">Dirección</label>
+
+        <div class="form-group">
+          <label class="field-label">Dirección</label>
           <input
             v-model="form.direccion"
             type="text"
-            class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 focus:outline-none transition-all"
-            placeholder="Dirección del cliente"
+            class="modal-input"
+            placeholder="Dirección opcional"
           />
         </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-600 mb-1.5">Teléfono</label>
-          <input
-            v-model="form.telefono"
-            type="text"
-            class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 focus:outline-none transition-all"
-            placeholder="Ej. 912345678"
-          />
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="field-label">Teléfono</label>
+            <input
+              v-model="form.telefono"
+              type="text"
+              class="modal-input"
+              placeholder="Ej. 912345678"
+            />
+          </div>
+          <div class="form-group">
+            <label class="field-label">Email</label>
+            <input
+              v-model="form.email"
+              type="email"
+              class="modal-input"
+              placeholder="correo@ejemplo.com"
+            />
+          </div>
         </div>
+
         <div class="flex gap-2 pt-2">
           <button
             type="submit"
-            class="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
+            class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
           >
-            <i :class="editId ? 'pi pi-check' : 'pi pi-plus'"></i>
+            <i :class="editId ? 'ti ti-check' : 'ti ti-plus'"></i>
             <span>{{ editId ? 'Guardar' : 'Registrar Cliente' }}</span>
           </button>
           <button
@@ -238,6 +267,7 @@ const authStore = useAuthStore()
 
 const customers = ref<any[]>([])
 const editId = ref<string | null>(null)
+const searchingApi = ref(false)
 
 // Pets management state
 const selectedCustomer = ref<any>(null)
@@ -257,12 +287,46 @@ const form = reactive({
   numero_documento: '',
   nombre: '',
   direccion: '',
-  telefono: ''
+  telefono: '',
+  email: ''
 })
 
 onMounted(() => {
   loadCustomers()
 })
+
+async function searchDocument() {
+  const doc = form.numero_documento.trim()
+  const type = form.tipo_documento
+  
+  if (type === 'DNI' && doc.length !== 8) return
+  if (type === 'RUC' && doc.length !== 11) return
+  if (type === 'CE') return
+
+  searchingApi.value = true
+  try {
+    const endpoint = type === 'DNI' ? `/public/dni/${doc}` : `/public/ruc/${doc}`
+    const res = await axios.get(endpoint)
+    if (res.data.success) {
+      const info = res.data.data || {}
+      form.nombre = info.nombre || info.razon_social || info.nombre_o_razon_social || ''
+      
+      let address = info.direccion || info.direccion_completa || ''
+      if (!address || address.trim() === '-') {
+        const parts = []
+        if (info.departamento && info.departamento !== '-') parts.push(info.departamento)
+        if (info.provincia && info.provincia !== '-') parts.push(info.provincia)
+        if (info.distrito && info.distrito !== '-') parts.push(info.distrito)
+        address = parts.join(' - ')
+      }
+      form.direccion = address
+    }
+  } catch (err: any) {
+    console.error('Error querying document', err)
+  } finally {
+    searchingApi.value = false
+  }
+}
 
 async function loadCustomers() {
   try {
@@ -303,7 +367,8 @@ function editCustomer(cust: any) {
     numero_documento: cust.numero_documento,
     nombre: cust.nombre,
     direccion: cust.direccion || '',
-    telefono: cust.telefono || ''
+    telefono: cust.telefono || '',
+    email: cust.email || ''
   })
 }
 
@@ -314,7 +379,8 @@ function cancelEdit() {
     numero_documento: '',
     nombre: '',
     direccion: '',
-    telefono: ''
+    telefono: '',
+    email: ''
   })
 }
 
@@ -405,3 +471,90 @@ async function deletePet(id: string) {
   }
 }
 </script>
+
+<style scoped>
+.customer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.modal-input, .modal-select {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #1e293b;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.modal-input:focus, .modal-select:focus {
+  border-color: #6366f1;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
+.input-search-group {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-search-api {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+
+.btn-search-api:hover:not(:disabled) {
+  background: #4f46e5;
+  transform: translateY(-1px);
+}
+
+.btn-search-api:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+</style>

@@ -36,6 +36,7 @@ func main() {
 		&models.Kardex{},
 		&models.Supplier{},
 		&models.Purchase{},
+		&models.PurchaseAttachment{},
 		&models.PurchaseItem{},
 		&models.Customer{},
 		&models.Pet{},
@@ -80,6 +81,8 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
+	router.Static("/uploads", "./uploads")
 
 	// API Routing Group
 	v1 := router.Group("/api/v1")
@@ -178,6 +181,9 @@ func main() {
 			protected.GET("/purchases", auth.BranchAdminMiddleware(), handlers.GetPurchases)
 			protected.GET("/purchases/:id", auth.BranchAdminMiddleware(), handlers.GetPurchaseDetails)
 			protected.POST("/purchases", auth.BranchAdminMiddleware(), handlers.CreatePurchase)
+			protected.PUT("/purchases/:id", auth.BranchAdminMiddleware(), handlers.UpdatePurchase)
+			protected.POST("/purchases/:id/attachments", auth.BranchAdminMiddleware(), handlers.UploadPurchaseAttachment)
+			protected.DELETE("/purchases/:id/attachments/:attachmentId", auth.BranchAdminMiddleware(), handlers.DeletePurchaseAttachment)
 
 			// Sales
 			protected.GET("/sales", handlers.GetSales)
@@ -198,6 +204,12 @@ func main() {
 			protected.GET("/billing/files/:uuid", handlers.GetBillingFiles)
 			protected.GET("/billing/documents", handlers.GetElectronicDocuments)
 			protected.GET("/billing/documents/stats", handlers.GetDocumentStats)
+			protected.POST("/billing/documents/:id/resend", handlers.ResendElectronicDocument)
+			protected.POST("/billing/documents/:id/void", handlers.VoidElectronicDocument)
+			protected.POST("/billing/documents/batch-emit", handlers.BatchEmitDrafts)
+			protected.PATCH("/billing/documents/:id/draft", handlers.UpdateElectronicDocumentDraft)
+			protected.GET("/billing/documents/:id/sync", handlers.SyncElectronicDocumentStatus)
+			protected.DELETE("/billing/documents/:id", auth.CompanyAdminMiddleware(), handlers.DeleteElectronicDocumentTest)
 			protected.GET("/billing/series", handlers.GetBillingSeries)
 			protected.PATCH("/billing/series/:branchId", auth.CompanyAdminMiddleware(), handlers.UpdateBillingSeries)
 

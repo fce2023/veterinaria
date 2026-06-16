@@ -115,6 +115,31 @@
           <div class="form-section-label">Información Legal</div>
           <div class="form-grid form-grid--3">
             <div class="field">
+              <label class="field-label">RUC (11 dígitos)</label>
+              <div class="input-with-action">
+                <input
+                  :value="business.ruc"
+                  type="text"
+                  class="field-input field-input--locked"
+                  disabled
+                />
+                <button 
+                  type="button" 
+                  @click="queryRucData" 
+                  :disabled="queryingRuc || !business.ruc"
+                  class="btn-query"
+                  title="Actualizar datos desde SUNAT"
+                >
+                  <div v-if="queryingRuc" class="btn-spinner btn-spinner--blue"></div>
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px;">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  <span>{{ queryingRuc ? '...' : 'Consultar' }}</span>
+                </button>
+              </div>
+              <p class="field-hint">Fijado en la creación de la cuenta</p>
+            </div>
+            <div class="field field--span-2">
               <label class="field-label">Razón Social <span class="required">*</span></label>
               <input
                 v-model="business.razon_social"
@@ -135,21 +160,11 @@
               />
               <p class="field-hint">Aparece en documentos y recibos</p>
             </div>
-            <div class="field">
-              <label class="field-label">RUC (11 dígitos)</label>
-              <input
-                :value="business.ruc"
-                type="text"
-                class="field-input field-input--locked"
-                disabled
-              />
-              <p class="field-hint">Fijado en la creación de la cuenta</p>
-            </div>
           </div>
 
           <div class="form-section-label" style="margin-top:24px;">Contacto & Ubicación</div>
           <div class="form-grid form-grid--3">
-            <div class="field">
+            <div class="field field--span-2">
               <label class="field-label">Dirección Fiscal</label>
               <input
                 v-model="business.direccion"
@@ -159,6 +174,49 @@
               />
               <p class="field-hint">Dirección que aparece en los comprobantes</p>
             </div>
+            <div class="field">
+              <label class="field-label">Ubigeo (6 dígitos)</label>
+              <input
+                v-model="business.ubigeo"
+                type="text"
+                placeholder="150101..."
+                class="field-input"
+                maxlength="6"
+              />
+            </div>
+          </div>
+
+          <div class="form-grid form-grid--3" style="margin-top:14px;">
+            <div class="field">
+              <label class="field-label">Departamento</label>
+              <input
+                v-model="business.departamento"
+                type="text"
+                placeholder="LIMA"
+                class="field-input"
+              />
+            </div>
+            <div class="field">
+              <label class="field-label">Provincia</label>
+              <input
+                v-model="business.provincia"
+                type="text"
+                placeholder="LIMA"
+                class="field-input"
+              />
+            </div>
+            <div class="field">
+              <label class="field-label">Distrito</label>
+              <input
+                v-model="business.distrito"
+                type="text"
+                placeholder="LIMA"
+                class="field-input"
+              />
+            </div>
+          </div>
+
+          <div class="form-grid form-grid--2" style="margin-top:14px;">
             <div class="field">
               <label class="field-label">Teléfono</label>
               <input
@@ -218,6 +276,7 @@ const logoInput = ref<HTMLInputElement | null>(null)
 const logoCompressing = ref(false)
 const logoFileSize = ref<number | null>(null)
 const businessAlert = reactive({ msg: '', type: 'success' as 'success' | 'error' })
+const queryingRuc = ref(false)
 
 const business = reactive({
   ruc: '',
@@ -226,12 +285,49 @@ const business = reactive({
   direccion: '',
   telefono: '',
   email: '',
-  logo_base64: ''
+  logo_base64: '',
+  ubigeo: '',
+  departamento: '',
+  provincia: '',
+  distrito: ''
 })
 
 onMounted(async () => {
   await loadBusinessProfile()
 })
+
+const queryRucData = async () => {
+  if (!business.ruc) return
+  queryingRuc.value = true
+  businessAlert.msg = ''
+  
+  try {
+    const res = await axios.get(`/public/ruc/${business.ruc}`)
+    if (res.data.success && res.data.data) {
+      const data = res.data.data
+      if (data.razon_social) business.razon_social = data.razon_social
+      if (data.direccion) business.direccion = data.direccion
+      if (data.ubigeo) business.ubigeo = String(data.ubigeo)
+      if (data.departamento) business.departamento = data.departamento
+      if (data.provincia) business.provincia = data.provincia
+      if (data.distrito) business.distrito = data.distrito
+      
+      // Auto-fill nombre comercial if it looks like a brand name or is empty
+      if (!business.nombre_comercial && data.nombre_comercial && data.nombre_comercial !== '-') {
+        business.nombre_comercial = data.nombre_comercial
+      }
+      
+      businessAlert.msg = '✓ Datos actualizados desde SUNAT.'
+      businessAlert.type = 'success'
+      setTimeout(() => { if (businessAlert.msg.includes('SUNAT')) businessAlert.msg = '' }, 3000)
+    }
+  } catch (err: any) {
+    businessAlert.msg = err.response?.data?.error || 'No se pudo consultar el RUC.'
+    businessAlert.type = 'error'
+  } finally {
+    queryingRuc.value = false
+  }
+}
 
 const triggerLogoInput = () => logoInput.value?.click()
 
@@ -349,7 +445,11 @@ async function saveBusinessProfile() {
       direccion: business.direccion,
       telefono: business.telefono,
       email: business.email,
-      logo_base64: business.logo_base64
+      logo_base64: business.logo_base64,
+      ubigeo: business.ubigeo,
+      departamento: business.departamento,
+      provincia: business.provincia,
+      distrito: business.distrito
     })
     if (res.data.success) {
       businessAlert.msg = '✓ Datos del negocio guardados correctamente.'
@@ -604,6 +704,41 @@ async function saveBusinessProfile() {
   color: #94a3b8;
   cursor: not-allowed;
   border-style: dashed;
+}
+.field--span-2 { grid-column: span 2; }
+.input-with-action {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.btn-query {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 9px;
+  color: #2563eb;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-query:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+.btn-query:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-spinner--blue {
+  border-top-color: #2563eb;
+  border-width: 1.5px;
+  width: 12px;
+  height: 12px;
 }
 .field-hint { font-size: 10.5px; color: #94a3b8; line-height: 1.4; }
 .alert-banner {

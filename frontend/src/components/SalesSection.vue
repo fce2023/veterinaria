@@ -1,341 +1,334 @@
 <template>
-  <div class="flex flex-col h-full space-y-4 md:space-y-6">
-    <!-- Header with Tabs -->
-    <div class="flex items-center justify-between bg-white p-2 md:p-3 rounded-3xl border border-slate-200 shadow-sm sticky top-0 z-20">
-      <div class="flex gap-1 md:gap-2">
-        <button
-          @click="activeSubTab = 'pos'; checkCashSession(); loadStocks()"
-          :class="[tabClass, activeSubTab === 'pos' ? tabActive : tabInactive]"
-        >
-          <i class="pi pi-desktop md:mr-2"></i>
-          <span class="hidden md:inline">Venta Nueva</span>
-          <span class="md:hidden">POS</span>
+  <div class="pos-container">
+    
+    <!-- Mode Switcher & Status -->
+    <div class="pos-header">
+      <div class="tab-pill">
+        <button class="tab-btn" :class="{ active: activeSubTab === 'pos' }" @click="activeSubTab = 'pos'; checkCashSession(); loadStocks()">
+          <i class="ti ti-device-desktop"></i><span>Venta nueva</span>
         </button>
-        <button
-          @click="activeSubTab = 'history'; loadSales()"
-          :class="[tabClass, activeSubTab === 'history' ? tabActive : tabInactive]"
-        >
-          <i class="pi pi-history md:mr-2"></i>
-          <span class="hidden md:inline">Historial</span>
-          <span class="md:hidden">Histor.</span>
+        <button class="tab-btn" :class="{ active: activeSubTab === 'history' }" @click="activeSubTab = 'history'; loadSales()">
+          <i class="ti ti-history"></i><span>Historial</span>
         </button>
       </div>
-      <div v-if="activeSubTab === 'pos'" :class="['px-4 py-2 rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-widest hidden sm:flex items-center gap-2', hasActiveCashSession ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700']">
-        <span :class="['w-2 h-2 rounded-full animate-pulse', hasActiveCashSession ? 'bg-emerald-500' : 'bg-red-500']"></span>
-        {{ hasActiveCashSession ? 'Caja Abierta' : 'Caja Cerrada' }}
+      <div v-if="activeSubTab === 'pos'" class="caja-badge" :class="{ closed: !hasActiveCashSession }">
+        {{ hasActiveCashSession ? 'Caja abierta' : 'Caja cerrada' }}
       </div>
     </div>
 
-    <!-- Warning if Cash is Closed -->
-    <div v-if="activeSubTab === 'pos' && !hasActiveCashSession" class="flex-1 bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-8 flex flex-col items-center justify-center text-center my-8">
-      <div class="w-16 h-16 bg-red-50 text-red-500 rounded-3xl flex items-center justify-center mb-4">
-        <i class="pi pi-lock text-3xl"></i>
-      </div>
-      <h3 class="text-xl font-black text-slate-900 mb-2">Caja de Turno Cerrada</h3>
-      <p class="text-xs text-slate-500 font-bold max-w-sm mb-6">Debes abrir una sesión de caja antes de realizar ventas. Esto permite llevar un control y arqueo adecuado de los ingresos.</p>
-      <button 
-        @click="emit('navigate', 'cash')"
-        class="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 transition-all flex items-center gap-2"
-      >
-        <i class="pi pi-wallet"></i> Ir a Apertura de Caja
-      </button>
-    </div>
-
-    <!-- Main Content Area -->
-    <div v-if="activeSubTab === 'pos' && hasActiveCashSession" class="flex-1 min-h-0">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full items-start">
+    <!-- POS VIEW -->
+    <div v-if="activeSubTab === 'pos'" class="pos-content">
+      
+      <!-- Left Side: Catalog -->
+      <div class="pos-main">
         
-        <!-- Left Side: Product Catalog -->
-        <div class="lg:col-span-7 xl:col-span-8 flex flex-col space-y-4 min-h-0">
-          <!-- Search & Customer -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div class="relative group">
-              <i class="pi pi-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
-              <input 
-                v-model="productSearch"
-                type="text" 
-                placeholder="Buscar producto..."
-                class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all shadow-sm"
-              />
+        <!-- Search & Quick Stats -->
+        <div class="pos-top-row">
+          <div class="search-wrap">
+            <i class="ti ti-search"></i>
+            <input v-model="productSearch" type="text" placeholder="Buscar producto por nombre o código..." class="search-input">
+          </div>
+          <div class="customer-wrap">
+            <i class="ti ti-user"></i>
+            <select v-model="saleForm.customer_id" class="customer-select">
+              <option value="">Público General</option>
+              <option v-for="cust in customers" :key="cust.id" :value="cust.id">{{ cust.nombre }}</option>
+            </select>
+            <button class="btn-add-customer" @click="openCustomerModal" title="Nuevo Cliente">
+              <i class="ti ti-user-plus"></i>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="!hasActiveCashSession" class="warning-card">
+          <div class="warning-icon"><i class="ti ti-lock"></i></div>
+          <h3>Caja cerrada</h3>
+          <p>Debes abrir una sesión de caja antes de realizar ventas.</p>
+          <button @click="emit('navigate', 'cash')" class="btn-primary">Ir a Apertura de Caja</button>
+        </div>
+
+        <div v-else class="products-grid">
+          <div v-for="item in filteredStocks" :key="item.product_id" 
+               class="prod-card" @click="quickAddItem(item)"
+               :class="{ 'out-of-stock': item.stock_actual <= 0 }">
+            <span class="stock-tag" :class="item.stock_actual > 5 ? 'stock-ok' : 'stock-low'">
+              {{ item.stock_actual.toFixed(2) }} {{ item.unidad_medida || 'un.' }}
+            </span>
+            <div class="prod-cat">{{ item.category_nombre || 'General' }}</div>
+            <div class="prod-name">{{ item.product_nombre }}</div>
+            <div class="prod-price-row">
+              <span class="prod-price">S/. {{ item.precio_venta.toFixed(2) }}</span>
+              <span class="prod-unit">/ {{ item.unidad_medida || 'un.' }}</span>
             </div>
-            <div class="relative">
-              <i class="pi pi-user absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
-              <select
-                v-model="saleForm.customer_id"
-                class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all shadow-sm appearance-none"
-              >
-                <option value="">Cliente: Público General</option>
-                <option v-for="cust in customers" :key="cust.id" :value="cust.id">{{ cust.nombre }}</option>
+            <button class="add-btn"><i class="ti ti-plus"></i>Agregar</button>
+            <div v-if="getItemQtyInCart(item.product_id)" class="qty-badge">{{ getItemQtyInCart(item.product_id) }}</div>
+          </div>
+          
+          <div v-if="filteredStocks.length === 0" class="empty-state">
+            <i class="ti ti-search-off"></i>
+            <p>No se encontraron productos</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Side: Cart -->
+      <aside class="cart-panel" :class="{ open: isCartOpen }">
+        <div class="cart-head">
+          <div class="cart-icon"><i class="ti ti-shopping-bag"></i></div>
+          <div>
+            <div class="cart-title">Carrito</div>
+            <div class="cart-subtitle">{{ saleForm.items.length }} ítems</div>
+          </div>
+          <button class="cart-close" @click="isCartOpen = false"><i class="ti ti-x"></i></button>
+        </div>
+
+        <div class="cart-body">
+          <div v-for="(item, idx) in saleForm.items" :key="idx" class="cart-item">
+            <div class="ci-info">
+              <div class="ci-name">{{ getProductName(item.product_id) }}</div>
+              <div class="ci-price">S/. {{ item.precio_unitario.toFixed(2) }} c/u</div>
+              
+              <div v-if="!item.is_dimensional" class="ci-controls">
+                <button class="qty-btn" @click="item.cantidad = Math.max(1, item.cantidad - 1)">-</button>
+                <span class="qty-val">{{ item.cantidad }}</span>
+                <button class="qty-btn" @click="item.cantidad++">+</button>
+              </div>
+              <div v-else class="ci-formula">{{ getDimensionalFormula(item) }}</div>
+            </div>
+            
+            <div class="ci-right">
+              <button class="ci-remove" @click="removeItem(idx)"><i class="ti ti-trash"></i></button>
+              <div class="ci-total">S/. {{ (((item.cantidad || 0) * (item.precio_unitario || 0)) - (item.descuento || 0)).toFixed(2) }}</div>
+            </div>
+
+            <!-- Dimensional Inputs -->
+            <div v-if="item.is_dimensional" class="ci-dim-grid">
+              <input v-if="['m', 'm2', 'm3'].includes(item.unidad_medida)" v-model.number="item.alto" type="number" step="0.01" placeholder="H" class="dim-input" @input="updateItemQuantity(item)">
+              <input v-if="['m2', 'm3'].includes(item.unidad_medida)" v-model.number="item.ancho" type="number" step="0.01" placeholder="W" class="dim-input" @input="updateItemQuantity(item)">
+              <input v-if="['m3'].includes(item.unidad_medida)" v-model.number="item.espesor" type="number" step="0.01" placeholder="E" class="dim-input" @input="updateItemQuantity(item)">
+              <input v-model.number="item.cantidad_piezas" type="number" step="1" placeholder="N" class="dim-input" @input="updateItemQuantity(item)">
+              <button v-if="['m2', 'm3'].includes(item.unidad_medida)" @click="swapDimensions(item); updateItemQuantity(item)" class="dim-swap"><i class="ti ti-arrows-exchange-2"></i></button>
+            </div>
+            <div class="ci-discount">
+              <span>Desc. S/.</span>
+              <input v-model.number="item.descuento" type="number" step="0.10" class="discount-input" @input="validateDiscount(item)">
+            </div>
+          </div>
+
+          <div v-if="saleForm.items.length === 0" class="cart-empty">
+            <i class="ti ti-shopping-cart-off"></i>
+            <p>Tu carrito está vacío</p>
+          </div>
+        </div>
+
+        <div class="cart-foot">
+          <div class="totals">
+            <div class="total-row"><span>Subtotal</span><span>S/. {{ calculatedSubtotal.toFixed(2) }}</span></div>
+            <div class="total-row"><span>IGV (18%)</span><span>S/. {{ calculatedIGV.toFixed(2) }}</span></div>
+            <div class="total-main">
+              <span>Total a pagar</span>
+              <span class="total-amount">S/. {{ calculatedTotal.toFixed(2) }}</span>
+            </div>
+          </div>
+
+          <!-- Change Calculator -->
+          <div v-if="saleForm.metodo_pago === 'EFECTIVO'" class="change-calc">
+            <div class="calc-row">
+              <label>Paga con S/.</label>
+              <input v-model.number="pagaCon" type="number" step="0.10" class="calc-input" placeholder="0.00">
+            </div>
+            <div class="calc-row highlighted">
+              <label>Vuelto S/.</label>
+              <span class="vuelto-amount">S/. {{ vuelto.toFixed(2) }}</span>
+            </div>
+          </div>
+
+          <div class="pay-options">
+            <div class="pay-group">
+              <label><i class="ti ti-file-text"></i> Doc.</label>
+              <select v-model="saleForm.tipo_documento" class="pay-select">
+                <option value="03">Boleta</option>
+                <option value="01">Factura</option>
+                <option value="NV">Nota Venta</option>
+              </select>
+            </div>
+            <div class="pay-group">
+              <label><i class="ti ti-credit-card"></i> Pago</label>
+              <select v-model="saleForm.metodo_pago" class="pay-select">
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TARJETA">Tarjeta</option>
+                <option value="YAPE">Yape / Plin</option>
               </select>
             </div>
           </div>
 
-          <!-- Product Grid -->
-          <div class="flex-1 overflow-y-auto pr-1 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 md:gap-4 pb-24 lg:pb-8">
-            <button 
-              v-for="item in filteredStocks" 
-              :key="item.product_id"
-              @click="quickAddItem(item)"
-              :disabled="item.stock_actual <= 0"
-              class="flex flex-col bg-white p-3 rounded-2xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:shadow-lg hover:shadow-indigo-50 transition-all active:scale-95 group relative text-left h-full"
-            >
-              <div class="flex flex-col h-full">
-                <div class="mb-2">
-                  <span class="inline-block px-2 py-0.5 bg-slate-50 text-[8px] font-black text-slate-500 uppercase tracking-wider rounded-md mb-1">{{ item.category_nombre || 'General' }}</span>
-                  <h4 class="text-xs font-black text-slate-900 leading-tight line-clamp-2 group-hover:text-indigo-600 transition-colors">{{ item.product_nombre }}</h4>
-                </div>
-                <div class="mt-auto pt-2 flex items-center justify-between">
-                  <span class="text-sm font-black text-slate-950">S/. {{ item.precio_venta.toFixed(2) }}</span>
-                  <span :class="['text-[8px] font-black px-1.5 py-0.5 rounded-lg border', item.stock_actual > 5 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100']">
-                    {{ item.stock_actual.toFixed(2) }} {{ item.unidad_medida || 'un.' }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="getItemQtyInCart(item.product_id)" class="absolute -top-1.5 -right-1.5 w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-lg ring-2 ring-white">
-                {{ getItemQtyInCart(item.product_id) }}
-              </div>
+          <div class="cart-actions">
+            <button class="btn-clear" @click="clearForm">Limpiar</button>
+            <button class="btn-pay" :disabled="!canSubmitSale" @click="submitSale">
+              <i class="ti ti-shopping-cart-check"></i> Pagar ahora
             </button>
           </div>
+          <p v-if="!canSubmitSale && saleForm.items.length > 0" class="pay-warning">
+            <i class="ti ti-alert-triangle"></i>
+            {{ saleForm.tipo_documento === '01' ? 'Factura requiere un cliente con RUC' : 'Venta ≥ S/. 700 requiere identificar al cliente' }}
+          </p>
         </div>
+      </aside>
+    </div>
 
-        <!-- Right Side: Cart Summary -->
-        <div 
-          :class="[
-            'lg:col-span-5 xl:col-span-4 bg-white lg:rounded-[2.5rem] border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 shadow-2xl lg:shadow-sm lg:sticky lg:top-24 max-h-[calc(100vh-8rem)]',
-            isCartOpen ? 'fixed inset-0 z-50 rounded-none' : 'hidden lg:flex'
-          ]"
-        >
-          <!-- Header -->
-          <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                <i class="pi pi-shopping-cart text-white"></i>
-              </div>
-              <div>
-                <h3 class="text-base font-black text-slate-900">Carrito</h3>
-                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{{ saleForm.items.length }} ítems</p>
-              </div>
-            </div>
-            <button @click="isCartOpen = false" class="lg:hidden w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400">
-              <i class="pi pi-times"></i>
-            </button>
+    <!-- HISTORY VIEW -->
+    <div v-else class="history-content">
+      <div v-for="sale in sales" :key="sale.id" class="history-card" @click="viewDetails(sale.id)">
+        <div class="h-icon"><i class="ti ti-receipt"></i></div>
+        <div class="h-info">
+          <div class="h-row">
+            <span class="h-id">#{{ sale.id.substring(0, 8).toUpperCase() }}</span>
+            <span class="h-total">S/. {{ sale.total.toFixed(2) }}</span>
           </div>
-
-          <!-- Items Scroll Area -->
-          <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">
-            <div v-for="(item, idx) in saleForm.items" :key="idx" class="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-3 group transition-all hover:border-indigo-200">
-              <div class="flex items-start gap-4">
-                <!-- Mini Badge -->
-                <div v-if="item.is_dimensional" class="flex flex-col items-center justify-center min-w-[3.2rem] h-12 bg-slate-900 text-white rounded-xl shadow-md">
-                   <span class="text-[10px] font-black">{{ item.cantidad.toFixed(2) }}</span>
-                   <span class="text-[7px] font-bold uppercase text-slate-400">{{ item.unidad_medida }}</span>
-                </div>
-                <div v-else class="flex flex-col items-center justify-center min-w-[3.2rem] h-12 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl">
-                   <span class="text-[10px] font-black">{{ item.cantidad }}</span>
-                   <span class="text-[7px] font-bold uppercase">{{ item.unidad_medida || 'un.' }}</span>
-                </div>
-
-                <div class="flex-1 min-w-0">
-                  <h5 class="text-xs font-black text-slate-900 leading-tight truncate">{{ getProductName(item.product_id) }}</h5>
-                  <p class="text-[10px] font-bold text-slate-400 mt-1">S/. {{ item.precio_unitario.toFixed(2) }} c/u</p>
-                </div>
-
-                <div class="text-right">
-                  <p class="text-sm font-black text-slate-900">S/. {{ ((item.cantidad * item.precio_unitario) - item.descuento).toFixed(2) }}</p>
-                  <button @click="removeItem(idx)" class="text-slate-300 hover:text-red-500 mt-1"><i class="pi pi-trash text-[10px]"></i></button>
-                </div>
-              </div>
-
-              <!-- Controls -->
-              <div class="flex items-center justify-between pt-2 border-t border-slate-50">
-                <div v-if="!item.is_dimensional" class="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                  <button @click="item.cantidad = Math.max(1, item.cantidad - 1)" class="w-5 h-5 text-slate-500"><i class="pi pi-minus text-[8px]"></i></button>
-                  <span class="text-[10px] font-black text-slate-900 min-w-[1.2rem] text-center">{{ item.cantidad }}</span>
-                  <button @click="item.cantidad++" class="w-5 h-5 text-slate-500"><i class="pi pi-plus text-[8px]"></i></button>
-                </div>
-                <div v-else class="flex-1 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-lg text-[8px] font-mono font-bold text-indigo-600 text-center">
-                   {{ getDimensionalFormula(item) }}
-                </div>
-                <div class="flex items-center gap-2 ml-2">
-                  <span class="text-[8px] font-black text-slate-400 uppercase">Desc. S/.</span>
-                  <input v-model.number="item.descuento" type="number" class="w-14 px-1 py-0.5 text-[10px] font-black bg-slate-100 border-none rounded text-right outline-none" />
-                </div>
-              </div>
-
-              <!-- Dimensional Tool -->
-              <div v-if="item.is_dimensional" class="grid grid-cols-12 gap-1.5 pt-1">
-                <div v-if="['m', 'm2', 'm3'].includes(item.unidad_medida)" class="col-span-3">
-                  <input v-model.number="item.alto" type="number" placeholder="H" class="w-full px-1 py-1 text-[10px] font-black bg-slate-50 border border-slate-200 rounded text-center"/>
-                </div>
-                <div v-if="['m2', 'm3'].includes(item.unidad_medida)" class="col-span-1 flex items-center justify-center">
-                  <button @click="swapDimensions(item)" class="text-slate-300"><i class="pi pi-sync text-[8px]"></i></button>
-                </div>
-                <div v-if="['m2', 'm3'].includes(item.unidad_medida)" class="col-span-3">
-                  <input v-model.number="item.ancho" type="number" placeholder="W" class="w-full px-1 py-1 text-[10px] font-black bg-slate-50 border border-slate-200 rounded text-center"/>
-                </div>
-                <div v-if="['m3'].includes(item.unidad_medida)" class="col-span-2">
-                  <input v-model.number="item.espesor" type="number" placeholder="E" class="w-full px-1 py-1 text-[10px] font-black bg-slate-50 border border-slate-200 rounded text-center"/>
-                </div>
-                <div class="col-span-3">
-                  <input v-model.number="item.cantidad_piezas" type="number" placeholder="N" class="w-full px-1 py-1 text-[10px] font-black bg-slate-50 border border-slate-200 rounded text-center"/>
-                </div>
-              </div>
-            </div>
-
-            <!-- Empty -->
-            <div v-if="saleForm.items.length === 0" class="flex flex-col items-center justify-center py-12 text-slate-300">
-               <i class="pi pi-shopping-bag text-3xl mb-2"></i>
-               <p class="text-[10px] font-black uppercase">Vacío</p>
-            </div>
-          </div>
-
-          <!-- Checkout Footer -->
-          <div class="p-6 bg-slate-900 text-white space-y-4">
-            <div class="space-y-1.5 border-b border-slate-800 pb-4">
-              <div class="flex justify-between items-center text-slate-500 text-[10px] font-bold">
-                <span>SUBTOTAL</span>
-                <span>S/. {{ calculatedSubtotal.toFixed(2) }}</span>
-              </div>
-              <div class="flex justify-between items-center text-slate-500 text-[10px] font-bold">
-                <span>IGV (18%)</span>
-                <span>S/. {{ calculatedIGV.toFixed(2) }}</span>
-              </div>
-              <div class="flex justify-between items-center pt-1">
-                <span class="text-xs font-black text-indigo-400">TOTAL A PAGAR</span>
-                <span class="text-2xl font-black">S/. {{ calculatedTotal.toFixed(2) }}</span>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-3">
-               <select v-model="saleForm.tipo_documento" class="bg-slate-800 border-none rounded-xl px-3 py-2 text-[10px] font-black">
-                 <option value="03">BOLETA</option>
-                 <option value="01">FACTURA</option>
-                 <option value="NV">NOTA VENTA</option>
-               </select>
-               <select v-model="saleForm.metodo_pago" class="bg-slate-800 border-none rounded-xl px-3 py-2 text-[10px] font-black">
-                 <option value="EFECTIVO">EFECTIVO</option>
-                 <option value="TARJETA">TARJETA</option>
-                 <option value="YAPE">YAPE/PLIN</option>
-               </select>
-            </div>
-
-            <div class="flex gap-2">
-              <button @click="clearForm" class="flex-1 py-3 bg-slate-800 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest">Limpiar</button>
-              <button @click="submitSale" :disabled="saleForm.items.length === 0" class="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Pagar Ahora</button>
-            </div>
-          </div>
+          <div class="h-customer">{{ sale.customer?.nombre || 'Público General' }}</div>
+          <div class="h-date">{{ formatDate(sale.created_at) }}</div>
         </div>
+        <i class="ti ti-chevron-right"></i>
       </div>
     </div>
 
-    <!-- Mode 2: Sales History -->
-    <div v-else class="flex-1 overflow-y-auto space-y-4 pb-20">
-      <div v-for="sale in sales" :key="sale.id" class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4 hover:border-indigo-300 transition-all">
-        <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center"><i class="pi pi-receipt"></i></div>
-        <div class="flex-1">
-          <div class="flex justify-between items-start">
-             <h4 class="text-sm font-black text-slate-900">#{{ sale.id.substring(0, 8).toUpperCase() }}</h4>
-             <span class="text-sm font-black text-slate-950">S/. {{ sale.total.toFixed(2) }}</span>
-          </div>
-          <p class="text-xs text-slate-500 font-bold">{{ sale.customer?.nombre || 'Público General' }}</p>
-          <p class="text-[10px] text-slate-400 mt-1 uppercase">{{ formatDate(sale.created_at) }}</p>
-        </div>
-        <button @click="viewDetails(sale.id)" class="w-8 h-8 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl"><i class="pi pi-chevron-right text-xs"></i></button>
-      </div>
-    </div>
-
-    <!-- Mobile Floating Cart -->
-    <button 
-      v-if="activeSubTab === 'pos' && !isCartOpen" 
-      @click="isCartOpen = true"
-      class="lg:hidden fixed bottom-24 right-6 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-2xl z-40 flex items-center justify-center"
-    >
-      <i class="pi pi-shopping-cart text-xl"></i>
-      <span v-if="saleForm.items.length > 0" class="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white">{{ saleForm.items.length }}</span>
+    <!-- Mobile Cart Toggle -->
+    <button v-if="activeSubTab === 'pos' && !isCartOpen" class="cart-toggle" @click="isCartOpen = true">
+      <i class="ti ti-shopping-bag"></i>
+      <span v-if="saleForm.items.length > 0" :key="badgeKey" class="cart-badge animate-pop">{{ saleForm.items.length }}</span>
     </button>
 
-    <!-- Modals (Details & Annulment) -->
-    <div v-if="showModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 z-[70] animate-fade-in">
-      <div @click="showModal = false" class="absolute inset-0"></div>
-      <div class="relative bg-white rounded-t-[3rem] sm:rounded-[3rem] w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div class="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <div>
-            <h3 class="text-xl font-black text-slate-900 flex items-center gap-2">
-              <span>Venta #{{ selectedSale?.sale?.id.substring(0, 8).toUpperCase() }}</span>
-              <span v-if="selectedSale?.sale?.estado === 'annulled'" class="px-2 py-0.5 rounded text-[8px] bg-red-100 text-red-600 font-black uppercase tracking-wider">ANULADO</span>
-            </h3>
-            <p class="text-[10px] text-indigo-500 font-black uppercase tracking-widest mt-1">Resumen detallado</p>
-          </div>
-          <button @click="showModal = false" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-2xl"><i class="pi pi-times"></i></button>
+    <!-- Modal Detail -->
+    <div v-if="showModal" class="modal-overlay" @click="showModal = false">
+      <div class="modal-card" @click.stop>
+        <div class="modal-head">
+          <h3>Venta #{{ selectedSale?.sale?.id.substring(0, 8).toUpperCase() }}</h3>
+          <button @click="showModal = false"><i class="ti ti-x"></i></button>
         </div>
-
-        <div class="flex-1 overflow-y-auto p-8 space-y-8">
-          <div class="grid grid-cols-2 gap-8">
-            <div class="space-y-1">
-              <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Cliente</p>
-              <p class="text-sm font-black text-slate-900">{{ selectedSale?.sale?.customer?.nombre || 'Público General' }}</p>
+        <div class="modal-body">
+          <!-- Details summary -->
+          <div class="detail-summary">
+            <div class="detail-group">
+              <label>Cliente</label>
+              <p>{{ selectedSale?.sale?.customer?.nombre || 'Público General' }}</p>
             </div>
-            <div class="text-right space-y-1">
-              <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Emisión</p>
-              <p class="text-sm font-black text-slate-900">{{ formatDate(selectedSale?.sale?.created_at) }}</p>
-            </div>
-          </div>
-
-          <div v-if="selectedSale?.has_electronic" class="p-6 bg-slate-900 rounded-[2rem] text-white">
-            <div class="flex items-center justify-between mb-4">
-              <div>
-                <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Comprobante</p>
-                <h4 class="text-lg font-black">{{ selectedSale.electronic_document.serie }}-{{ selectedSale.electronic_document.numero }}</h4>
-              </div>
-              <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-400">{{ selectedSale.electronic_document.estado }}</span>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <button @click="downloadFile(selectedSale.electronic_document.document_uuid, 'pdf')" class="flex items-center justify-center gap-2 py-3 bg-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest">PDF</button>
-              <button @click="downloadFile(selectedSale.electronic_document.document_uuid, 'xml')" class="flex items-center justify-center gap-2 py-3 bg-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest">XML</button>
+            <div class="detail-group text-right">
+              <label>Fecha</label>
+              <p>{{ formatDate(selectedSale?.sale?.created_at) }}</p>
             </div>
           </div>
 
-          <div class="space-y-4">
-            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Ítems</p>
-            <div v-for="item in selectedSale?.items" :key="item.id" class="flex items-center gap-4 py-3 border-b border-slate-50">
-              <div class="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 font-black text-xs">{{ item.cantidad.toFixed(2) }}</div>
-              <div class="flex-1">
-                <h5 class="text-xs font-black text-slate-900">{{ item.product_nombre }}</h5>
-                <p v-if="item.is_dimensional" class="text-[8px] text-slate-500 mt-0.5">Dim: {{ item.alto }}x{{ item.ancho }}x{{ item.espesor }} ({{ item.cantidad_piezas }})</p>
+          <!-- Electronic links if any -->
+          <div v-if="selectedSale?.has_electronic" class="electronic-card">
+            <div class="e-head">
+              <h4>{{ selectedSale.electronic_document.serie }}-{{ selectedSale.electronic_document.numero }}</h4>
+              <span class="e-status">{{ selectedSale.electronic_document.estado }}</span>
+            </div>
+            <div class="e-actions">
+              <button @click="downloadFile(selectedSale.electronic_document.document_uuid, 'pdf')">PDF</button>
+              <button @click="downloadFile(selectedSale.electronic_document.document_uuid, 'xml')">XML</button>
+            </div>
+          </div>
+
+          <!-- Items list -->
+          <div class="modal-items">
+            <div v-for="item in selectedSale?.items" :key="item.id" class="m-item">
+              <div class="m-qty">{{ item.cantidad.toFixed(2) }}</div>
+              <div class="m-info">
+                <p class="m-name">{{ item.product_nombre }}</p>
+                <p v-if="item.is_dimensional" class="m-dim">Dim: {{ item.alto }}x{{ item.ancho }}x{{ item.espesor }}</p>
               </div>
-              <p class="text-xs font-black text-slate-950">S/. {{ item.total.toFixed(2) }}</p>
+              <div class="m-total">S/. {{ item.total.toFixed(2) }}</div>
             </div>
           </div>
         </div>
-
-        <div class="p-8 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-           <div>
-              <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Total</p>
-              <p class="text-2xl font-black text-slate-900">S/. {{ selectedSale?.sale?.total.toFixed(2) }}</p>
-           </div>
-           <div class="flex gap-2">
-             <button v-if="selectedSale?.sale?.estado !== 'annulled'" @click="openAnnulmentConfirm" class="px-5 py-3 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest">Anular</button>
-             <button @click="showModal = false" class="px-8 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest">Cerrar</button>
-           </div>
+        <div class="modal-foot">
+          <div class="m-grand-total">
+            <label>Total</label>
+            <p>S/. {{ selectedSale?.sale?.total.toFixed(2) }}</p>
+          </div>
+          <div class="m-actions">
+            <button v-if="selectedSale?.sale?.estado !== 'annulled'" @click="openAnnulmentConfirm" class="btn-annul">Anular</button>
+            <button @click="showModal = false" class="btn-close">Cerrar</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <div v-if="showAnnulmentModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 z-[80] animate-fade-in">
-      <div class="bg-white rounded-[2rem] max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
-        <h3 class="text-base font-black text-slate-900">Anular Comprobante</h3>
-        <select v-model="annulmentReason" class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
+    <!-- Annulment Modal -->
+    <div v-if="showAnnulmentModal" class="modal-overlay" @click="showAnnulmentModal = false">
+      <div class="modal-mini" @click.stop>
+        <h3>Anular Comprobante</h3>
+        <select v-model="annulmentReason" class="modal-select">
           <option value="">-- Seleccionar Motivo --</option>
           <option value="ANULACION DE LA OPERACION">Anulación de la operación</option>
           <option value="ERROR EN EL RUC O NOMBRE">Error en el RUC o Nombre</option>
           <option value="DEVOLUCION TOTAL DE MERCADERIA">Devolución total</option>
         </select>
-        <div class="flex justify-end gap-2 pt-2">
-          <button @click="showAnnulmentModal = false" class="px-4 py-2 text-xs font-bold text-slate-500">Cancelar</button>
-          <button @click="submitAnnulment" :disabled="!annulmentReason || annulling" class="px-4 py-2 text-xs font-bold text-white bg-red-600 rounded-xl">Confirmar</button>
+        <div class="modal-actions">
+          <button @click="showAnnulmentModal = false">Cancelar</button>
+          <button @click="submitAnnulment" :disabled="!annulmentReason || annulling" class="btn-confirm">Confirmar</button>
         </div>
       </div>
     </div>
+
+    <!-- Quick Customer Modal -->
+    <div v-if="showCustomerModal" class="modal-overlay" @click="showCustomerModal = false">
+      <div class="modal-card" style="max-width: 500px;" @click.stop>
+        <div class="modal-head">
+          <h3>Nuevo Cliente</h3>
+          <button @click="showCustomerModal = false"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="customer-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Tipo Doc.</label>
+                <select v-model="newCustomer.tipo_documento" class="modal-select">
+                  <option value="DNI">DNI</option>
+                  <option value="RUC">RUC</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex: 2;">
+                <label>N° Documento</label>
+                <div class="input-search-group">
+                  <input v-model="newCustomer.numero_documento" type="text" maxlength="11" class="modal-input" placeholder="8 o 11 dígitos">
+                  <button @click="searchIdentity" :disabled="isSearching" class="btn-search-api">
+                    <i v-if="!isSearching" class="ti ti-search"></i>
+                    <i v-else class="ti ti-loader animate-spin"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Nombre / Razón Social</label>
+              <input v-model="newCustomer.nombre" type="text" class="modal-input" placeholder="Nombre completo">
+            </div>
+            <div class="form-group">
+              <label>Dirección</label>
+              <input v-model="newCustomer.direccion" type="text" class="modal-input" placeholder="Dirección opcional">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Teléfono</label>
+                <input v-model="newCustomer.telefono" type="text" class="modal-input">
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input v-model="newCustomer.email" type="email" class="modal-input">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button @click="showCustomerModal = false" class="btn-cancel">Cancelar</button>
+          <button @click="saveCustomer" :disabled="!newCustomer.nombre || !newCustomer.numero_documento || savingCustomer" class="btn-save-customer">
+            {{ savingCustomer ? 'Guardando...' : 'Registrar y Seleccionar' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -351,13 +344,15 @@ const stocks = ref<any[]>([])
 const sales = ref<any[]>([])
 const productSearch = ref('')
 const isCartOpen = ref(false)
+const badgeKey = ref(0) // Trigger for animation
 const hasActiveCashSession = ref(true)
 const activeSession = ref<any>(null)
 
-// CSS Classes
-const tabClass = 'flex items-center gap-2 px-6 py-3 rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-widest transition-all'
-const tabActive = 'bg-slate-900 text-white shadow-xl shadow-slate-200'
-const tabInactive = 'text-slate-400 hover:bg-slate-50'
+const pagaCon = ref<number | null>(null)
+const vuelto = computed(() => {
+  if (!pagaCon.value || pagaCon.value < calculatedTotal.value) return 0
+  return pagaCon.value - calculatedTotal.value
+})
 
 const saleForm = reactive({
   customer_id: '',
@@ -368,6 +363,76 @@ const saleForm = reactive({
 
 const showModal = ref(false)
 const selectedSale = ref<any>(null)
+
+// Quick Customer Registration
+const showCustomerModal = ref(false)
+const isSearching = ref(false)
+const savingCustomer = ref(false)
+const newCustomer = reactive({
+  tipo_documento: 'DNI',
+  numero_documento: '',
+  nombre: '',
+  direccion: '',
+  telefono: '',
+  email: ''
+})
+
+function openCustomerModal() {
+  newCustomer.tipo_documento = 'DNI'
+  newCustomer.numero_documento = ''
+  newCustomer.nombre = ''
+  newCustomer.direccion = ''
+  newCustomer.telefono = ''
+  newCustomer.email = ''
+  showCustomerModal.value = true
+}
+
+async function searchIdentity() {
+  if (!newCustomer.numero_documento) return
+  isSearching.value = true
+  try {
+    const type = newCustomer.tipo_documento.toLowerCase()
+    const res = await axios.get(`/public/${type}/${newCustomer.numero_documento}`)
+    if (res.data.success) {
+      const d = res.data.data || {}
+      if (type === 'dni') {
+        newCustomer.nombre = d.nombre || d.full_name || ''
+      } else {
+        newCustomer.nombre = d.razon_social || d.nombre || d.nombre_o_razon_social || d.razonSocial || ''
+        
+        let address = d.direccion || d.direccion_completa || ''
+        if (!address || address.trim() === '-') {
+          const parts = []
+          if (d.departamento && d.departamento !== '-') parts.push(d.departamento)
+          if (d.provincia && d.provincia !== '-') parts.push(d.provincia)
+          if (d.distrito && d.distrito !== '-') parts.push(d.distrito)
+          address = parts.join(' - ')
+        }
+        newCustomer.direccion = address
+      }
+    }
+  } catch (err) {
+    alert('No se pudo encontrar el documento')
+  } finally {
+    isSearching.value = false
+  }
+}
+
+async function saveCustomer() {
+  savingCustomer.value = true
+  try {
+    const res = await axios.post('/customers', newCustomer)
+    if (res.data.success) {
+      await loadCustomers()
+      saleForm.customer_id = res.data.data.id
+      showCustomerModal.value = false
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Error al guardar cliente')
+  } finally {
+    savingCustomer.value = false
+  }
+}
 
 const filteredStocks = computed(() => {
   const query = productSearch.value.toLowerCase()
@@ -382,17 +447,32 @@ const calculatedTotal = computed(() => {
 })
 
 const calculatedSubtotal = computed(() => {
-  if (saleForm.tipo_documento === '01' || saleForm.tipo_documento === '03') {
-    return calculatedTotal.value / 1.18
-  }
-  return calculatedTotal.value
+  // Golden Rule: Subtotal = Total / 1.18 (For Gravado items)
+  return calculatedTotal.value / 1.18
 })
 
 const calculatedIGV = computed(() => {
-  if (saleForm.tipo_documento === '01' || saleForm.tipo_documento === '03') {
-    return calculatedTotal.value - calculatedSubtotal.value
+  // Golden Rule: IGV = Total - Subtotal
+  return calculatedTotal.value - calculatedSubtotal.value
+})
+
+// Senior Validation: Check if sale can be processed
+const canSubmitSale = computed(() => {
+  if (saleForm.items.length === 0) return false
+  
+  // Rule: Factura (01) requires customer with RUC (Tipo 6)
+  if (saleForm.tipo_documento === '01') {
+    const cust = customers.value.find(c => c.id === saleForm.customer_id)
+    if (!cust || cust.tipo_documento !== 'RUC') return false
   }
-  return 0
+
+  // Rule: Boleta (03) > 700 requires identification (not 00000000)
+  if (saleForm.tipo_documento === '03' && calculatedTotal.value >= 700) {
+    const cust = customers.value.find(c => c.id === saleForm.customer_id)
+    if (!cust || cust.numero_documento === '00000000') return false
+  }
+
+  return true
 })
 
 watch(() => saleForm.customer_id, (newId) => {
@@ -408,70 +488,98 @@ watch(() => saleForm.customer_id, (newId) => {
   }
 })
 
-watch(() => saleForm.items, (newItems) => {
-  newItems.forEach(item => {
-    if (item.is_dimensional) {
-      const piezas = item.cantidad_piezas || 1
-      switch (item.unidad_medida) {
-        case 'm':
-          item.cantidad = (item.alto || 0) * piezas
-          break
-        case 'm2':
-          item.cantidad = (item.alto || 0) * (item.ancho || 0) * piezas
-          break
-        case 'm3':
-          item.cantidad = (item.alto || 0) * (item.ancho || 0) * (item.espesor || 0) * piezas
-          break
-        default:
-          item.cantidad = (item.alto || 0) * (item.ancho || 0) * piezas
-      }
-    }
-  })
-}, { deep: true })
+function validateDiscount(item: any) {
+  if (item.descuento < 0) item.descuento = 0
+}
 
+function updateItemQuantity(item: any) {
+  if (!item.is_dimensional) return
 
+  const piezas = Number(item.cantidad_piezas) || 1
+  const alto = Number(item.alto) || 1
+  const ancho = Number(item.ancho) || 1
+  const espesor = Number(item.espesor) || 1
+
+  switch (item.unidad_medida) {
+    case 'm':
+      item.cantidad = alto * piezas
+      break
+    case 'm2':
+      item.cantidad = alto * ancho * piezas
+      break
+    case 'm3':
+      item.cantidad = alto * ancho * espesor * piezas
+      break
+    default:
+      item.cantidad = piezas
+  }
+}
+
+function quickAddItem(stock: any) {
+  if (stock.is_dimensional) {
+    const isMetric = ['m', 'm2', 'm3'].includes(stock.unidad_medida)
+    const defaultAlto = isMetric ? 1.0 : 1.0
+    const defaultAncho = ['m2', 'm3'].includes(stock.unidad_medida) ? 1.0 : 1.0
+    const defaultEspesor = ['m3'].includes(stock.unidad_medida) ? 0.1 : 1.0
+    
+    const newItem = reactive({
+      product_id: stock.product_id,
+      cantidad: 1.0,
+      precio_unitario: stock.precio_venta,
+      descuento: 0,
+      alto: defaultAlto,
+      ancho: defaultAncho,
+      espesor: defaultEspesor,
+      cantidad_piezas: 1,
+      is_dimensional: true,
+      unidad_medida: stock.unidad_medida
+    })
+    updateItemQuantity(newItem)
+    saleForm.items.push(newItem)
+    isCartOpen.value = true
+    badgeKey.value++
+    return
+  }
+  const alreadyAdded = saleForm.items.find(item => item.product_id === stock.product_id && !item.is_dimensional)
+  if (alreadyAdded) {
+    alreadyAdded.cantidad += 1
+  } else {
+    saleForm.items.push({
+      product_id: stock.product_id,
+      cantidad: 1,
+      precio_unitario: stock.precio_venta,
+      descuento: 0,
+      is_dimensional: false,
+      unidad_medida: stock.unidad_medida || 'und'
+    })
+  }
+  badgeKey.value++
+}
 
 let barcodeBuffer = ''
 let lastKeyTime = 0
 
 const handleGlobalKeyPress = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement
-  // Ignore inputs unless it's body or generic search inputs
   if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
-    if (target.getAttribute('placeholder') === 'Buscar producto...') {
-      // Allow searching normally, do not intercept
-      return
-    }
+    if (target.getAttribute('placeholder')?.includes('Buscar producto')) return
   }
 
   const currentTime = Date.now()
-  if (currentTime - lastKeyTime > 50) {
-    barcodeBuffer = ''
-  }
-
+  if (currentTime - lastKeyTime > 50) barcodeBuffer = ''
   lastKeyTime = currentTime
 
   if (e.key !== 'Enter') {
-    if (e.key.length === 1 && /[0-9a-zA-Z]/.test(e.key)) {
-      barcodeBuffer += e.key
-    }
+    if (e.key.length === 1 && /[0-9a-zA-Z]/.test(e.key)) barcodeBuffer += e.key
   } else {
     if (barcodeBuffer.length >= 4) {
       e.preventDefault()
-      
-      // Look for the product with this barcode or code in stocks
       const foundStock = stocks.value.find(s => 
         (s.product_codigo && s.product_codigo === barcodeBuffer) || 
         (s.product_codigo_barras && s.product_codigo_barras === barcodeBuffer)
       )
-
-      if (foundStock) {
-        quickAddItem(foundStock)
-      } else {
-        // Fallback: type the code into search input
-        productSearch.value = barcodeBuffer
-      }
-      
+      if (foundStock) quickAddItem(foundStock)
+      else productSearch.value = barcodeBuffer
       barcodeBuffer = ''
     }
   }
@@ -496,7 +604,6 @@ async function checkCashSession() {
       hasActiveCashSession.value = !!res.data.data
     }
   } catch (err) {
-    console.error('Error checking cash session', err)
     hasActiveCashSession.value = false
   }
 }
@@ -505,99 +612,36 @@ async function loadCustomers() {
   try {
     const res = await axios.get('/customers')
     if (res.data.success) customers.value = res.data.data
-  } catch (err) {
-    console.error('Error loading customers', err)
-  }
+  } catch (err) {}
 }
 
 async function loadStocks() {
   try {
     const res = await axios.get('/stocks')
     if (res.data.success) stocks.value = res.data.data || []
-  } catch (err) {
-    console.error('Error loading stocks', err)
-  }
+  } catch (err) {}
 }
 
 async function loadSales() {
   try {
     const res = await axios.get('/sales')
     if (res.data.success) sales.value = res.data.data || []
-  } catch (err) {
-    console.error('Error loading sales', err)
-  }
+  } catch (err) {}
 }
 
-/**
- * Senior UX: Intercambia las dimensiones de Alto y Ancho para ítems m2/m3
- */
 function swapDimensions(item: any) {
   const temp = item.alto
   item.alto = item.ancho
   item.ancho = temp
 }
 
-/**
- * Senior Feedback: Genera un string de la fórmula matemática para visualización
- */
 function getDimensionalFormula(item: any): string {
   const piezasStr = item.cantidad_piezas > 1 ? ` × ${item.cantidad_piezas}` : ''
   const unit = item.unidad_medida || 'm'
-  
-  if (unit === 'm') {
-    return `${item.alto.toFixed(2)}m${piezasStr} = ${item.cantidad.toFixed(2)}m`
-  }
-  if (unit === 'm2') {
-    return `[${item.alto.toFixed(2)} × ${item.ancho.toFixed(2)}]${piezasStr} = ${item.cantidad.toFixed(2)}m²`
-  }
-  if (unit === 'm3') {
-    return `[${item.alto.toFixed(2)} × ${item.ancho.toFixed(2)} × ${item.espesor.toFixed(2)}]${piezasStr} = ${item.cantidad.toFixed(2)}m³`
-  }
+  if (unit === 'm') return `${(item.alto || 1).toFixed(2)}m${piezasStr} = ${item.cantidad.toFixed(2)}m`
+  if (unit === 'm2') return `[${(item.alto || 1).toFixed(2)}x${(item.ancho || 1).toFixed(2)}]${piezasStr} = ${item.cantidad.toFixed(2)}m²`
+  if (unit === 'm3') return `[${(item.alto || 1).toFixed(2)}x${(item.ancho || 1).toFixed(2)}x${(item.espesor || 1).toFixed(2)}]${piezasStr} = ${item.cantidad.toFixed(2)}m³`
   return `${item.cantidad.toFixed(2)} ${unit}`
-}
-
-function quickAddItem(stock: any) {
-  if (stock.is_dimensional) {
-    const defaultAlto = ['m', 'm2', 'm3'].includes(stock.unidad_medida) ? 1.0 : 0.0
-    const defaultAncho = ['m2', 'm3'].includes(stock.unidad_medida) ? 1.0 : 0.0
-    const defaultEspesor = ['m3'].includes(stock.unidad_medida) ? 0.1 : 0.0
-
-    saleForm.items.push({
-      product_id: stock.product_id,
-      cantidad: defaultAlto || 1.0,
-      precio_unitario: stock.precio_venta,
-      descuento: 0,
-      alto: defaultAlto,
-      ancho: defaultAncho,
-      espesor: defaultEspesor,
-      cantidad_piezas: 1,
-      is_dimensional: true,
-      unidad_medida: stock.unidad_medida
-    })
-    isCartOpen.value = true
-    return
-  }
-
-  const alreadyAdded = saleForm.items.find(item => item.product_id === stock.product_id && !item.is_dimensional)
-  const currentQty = alreadyAdded ? alreadyAdded.cantidad : 0
-
-  if (currentQty + 1 > stock.stock_actual) {
-    alert('Stock insuficiente')
-    return
-  }
-
-  if (alreadyAdded) {
-    alreadyAdded.cantidad += 1
-  } else {
-    saleForm.items.push({
-      product_id: stock.product_id,
-      cantidad: 1,
-      precio_unitario: stock.precio_venta,
-      descuento: 0,
-      is_dimensional: false,
-      unidad_medida: stock.unidad_medida || 'und'
-    })
-  }
 }
 
 function getItemQtyInCart(pId: string) {
@@ -619,18 +663,13 @@ function clearForm() {
   saleForm.tipo_documento = '03'
   saleForm.metodo_pago = 'EFECTIVO'
   saleForm.items = []
+  pagaCon.value = null
   isCartOpen.value = false
 }
 
 async function submitSale() {
   if (saleForm.items.length === 0) return
-
-  // Prepare payload: if customer_id is empty, send null
-  const payload = {
-    ...saleForm,
-    customer_id: saleForm.customer_id === '' ? null : saleForm.customer_id
-  }
-
+  const payload = { ...saleForm, customer_id: saleForm.customer_id === '' ? null : saleForm.customer_id }
   try {
     const res = await axios.post('/sales', payload)
     if (res.data.success) {
@@ -659,20 +698,13 @@ async function viewDetails(id: string) {
 
 async function downloadFile(uuid: string, type: 'pdf' | 'xml' | 'cdr') {
   try {
-    // This is the endpoint to get secure URLs from the billing microservice
-    // For now we can redirect directly if we know the pattern or fetch it
-    const res = await axios.get(`/billing/files/${uuid}`) // We might need to implement this handler in backend
-    if (res.data.files && res.data.files[type]) {
-      window.open(res.data.files[type], '_blank')
-    }
+    const res = await axios.get(`/billing/files/${uuid}`)
+    if (res.data.files && res.data.files[type]) window.open(res.data.files[type], '_blank')
   } catch (err) {
-    // Fallback or simple alert
     alert('Obteniendo archivo...')
-    // In production, this would call the FacturaAPI redirect
   }
 }
 
-// Annulment variables & handlers
 const showAnnulmentModal = ref(false)
 const annulmentReason = ref('')
 const annulling = ref(false)
@@ -686,49 +718,354 @@ async function submitAnnulment() {
   if (!annulmentReason.value.trim()) return
   annulling.value = true
   try {
-    const res = await axios.post(`/sales/${selectedSale.value.sale.id}/credit-note`, {
-      motivo: annulmentReason.value
-    })
+    const res = await axios.post(`/sales/${selectedSale.value.sale.id}/credit-note`, { motivo: annulmentReason.value })
     if (res.data.success) {
-      alert('¡Venta anulada con éxito mediante Nota de Crédito!')
+      alert('¡Venta anulada con éxito!')
       showAnnulmentModal.value = false
       showModal.value = false
-      loadSales() // Reload history
+      loadSales()
     }
   } catch (err: any) {
-    alert('Error al anular la venta: ' + (err.response?.data?.error || err.message))
+    alert('Error al anular: ' + (err.response?.data?.error || err.message))
   } finally {
     annulling.value = false
   }
 }
 
-function getDocTypeName(tipo: string) {
-  if (tipo === '01') return 'Factura'
-  if (tipo === '03') return 'Boleta'
-  if (tipo === 'NV') return 'Nota de Venta'
-  return 'Ticket'
-}
-
 function formatDate(dStr: string) {
   if (!dStr) return '-'
   const d = new Date(dStr)
-  return d.toLocaleString('es-PE', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  return d.toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
 <style scoped>
-.animate-bounce-slow {
-  animation: bounce 2s infinite;
+.pos-container { height: 100%; display: flex; flex-direction: column; gap: 20px; }
+
+.pos-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.tab-pill { background: var(--surface2); padding: 4px; border-radius: 50px; display: flex; gap: 4px; }
+.tab-btn {
+  padding: 8px 20px; border-radius: 50px; border: none; background: transparent;
+  color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; transition: all var(--transition);
+}
+.tab-btn.active { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+
+.caja-badge {
+  padding: 8px 16px; border-radius: 50px; background: var(--green-dim); color: var(--green);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  display: flex; align-items: center; gap: 8px; border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.caja-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+.caja-badge.closed { background: var(--red-dim); color: var(--red); border-color: rgba(239, 68, 68, 0.2); }
+.caja-badge.closed::before { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+.pos-content { flex: 1; display: flex; overflow: hidden; gap: 24px; }
+.pos-main { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 20px; }
+
+.pos-top-row { display: flex; gap: 12px; flex-shrink: 0; }
+.search-wrap, .customer-wrap { position: relative; flex: 1; }
+.search-wrap i, .customer-wrap i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text3); }
+.search-input, .customer-select {
+  width: 100%; height: 46px; padding: 0 16px 0 42px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-family: inherit; font-size: 13.5px; outline: none; transition: all var(--transition);
+}
+.search-input:focus, .customer-select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); }
+.customer-select { appearance: none; cursor: pointer; }
+
+.products-grid {
+  flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px; align-content: start; padding-bottom: 20px;
+}
+.prod-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; cursor: pointer; transition: all var(--transition); position: relative;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.prod-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+.prod-card.out-of-stock { opacity: 0.6; cursor: not-allowed; }
+
+.stock-tag {
+  position: absolute; top: 12px; right: 12px; font-size: 9px; font-weight: 800;
+  padding: 3px 8px; border-radius: 6px; text-transform: uppercase;
+}
+.stock-ok { background: var(--green-dim); color: var(--green); }
+.stock-low { background: var(--red-dim); color: var(--red); }
+
+.prod-cat { font-size: 9px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; }
+.prod-name { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.4; flex: 1; min-height: 36px; }
+.prod-price-row { display: flex; align-items: baseline; gap: 4px; }
+.prod-price { font-size: 18px; font-weight: 800; color: var(--text); }
+.prod-unit { font-size: 11px; color: var(--text2); }
+
+.add-btn {
+  width: 100%; padding: 8px; border-radius: var(--radius-sm); border: none;
+  background: var(--surface2); color: var(--accent); font-weight: 700; font-size: 12px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all var(--transition);
+}
+.prod-card:hover .add-btn { background: var(--accent); color: #fff; }
+.qty-badge {
+  position: absolute; -top: 8px; -left: 8px; width: 22px; height: 22px;
+  background: var(--accent); color: #fff; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
+  box-shadow: 0 4px 8px rgba(79, 70, 229, 0.4); border: 2px solid var(--surface);
 }
 
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
+.cart-panel {
+  width: 360px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden;
+  transition: transform var(--transition);
+}
+.cart-head { padding: 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.cart-icon {
+  width: 40px; height: 40px; border-radius: 12px; background: var(--accent);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.cart-title { font-size: 16px; font-weight: 800; }
+.cart-subtitle { font-size: 11px; color: var(--text2); text-transform: uppercase; font-weight: 700; }
+.cart-close { display: none; margin-left: auto; background: none; border: none; color: var(--text3); font-size: 20px; }
+
+.cart-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.cart-item {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.ci-info { flex: 1; }
+.ci-name { font-size: 13px; font-weight: 700; line-height: 1.3; }
+.ci-price { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+.ci-controls { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.qty-btn {
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-weight: 800; cursor: pointer;
+}
+.qty-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.qty-val { font-size: 14px; font-weight: 800; min-width: 24px; text-align: center; }
+
+.ci-formula { font-size: 10px; font-family: monospace; color: var(--accent); font-weight: 700; margin-top: 8px; }
+
+.ci-right { display: flex; align-items: center; justify-content: space-between; }
+.ci-remove { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; }
+.ci-remove:hover { color: var(--red); }
+.ci-total { font-size: 14px; font-weight: 800; color: var(--text); }
+
+.ci-dim-grid { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; margin-top: 4px; }
+.dim-input {
+  width: 100%; padding: 4px; font-size: 10px; font-weight: 800; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface); text-align: center;
+}
+.dim-swap { background: none; border: none; color: var(--text3); cursor: pointer; }
+
+.ci-discount { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 700; color: var(--text3); }
+.discount-input { width: 60px; padding: 2px 6px; font-size: 11px; font-weight: 800; border-radius: 4px; border: 1px solid var(--border); text-align: right; }
+
+.cart-foot { padding: 20px; border-top: 1px solid var(--border); background: var(--surface); }
+.totals { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.total-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); font-weight: 600; }
+.total-main {
+  display: flex; justify-content: space-between; align-items: center; margin-top: 8px;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+.total-main span:first-child { font-size: 14px; font-weight: 700; }
+.total-amount { font-size: 26px; font-weight: 900; color: var(--accent); }
+
+.change-calc {
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.calc-row label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text2);
+  text-transform: uppercase;
+}
+.calc-input {
+  width: 100px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: right;
+  outline: none;
+}
+.calc-input:focus { border-color: var(--accent); }
+.calc-row.highlighted {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.vuelto-amount {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--green);
+}
+
+.pay-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.pay-group { display: flex; flex-direction: column; gap: 4px; }
+.pay-group label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text3);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pay-group label i { font-size: 12px; }
+.pay-select {
+  width: 100%; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface2); font-size: 11px; font-weight: 700; outline: none;
+}
+
+.cart-actions { display: flex; gap: 8px; }
+.btn-clear { flex: 1; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; font-weight: 700; cursor: pointer; }
+.btn-pay {
+  flex: 2; padding: 12px; border-radius: var(--radius-sm); border: none; background: var(--accent);
+  color: #fff; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+.btn-pay:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+.pay-warning {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: var(--red-dim);
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.1);
+}
+
+/* History */
+.history-content { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.history-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; display: flex; align-items: center; gap: 16px; cursor: pointer; transition: all var(--transition);
+}
+.history-card:hover { border-color: var(--accent); transform: scale(1.02); }
+.h-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.h-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.h-row { display: flex; justify-content: space-between; align-items: baseline; }
+.h-id { font-size: 13px; font-weight: 800; color: var(--text); }
+.h-total { font-size: 15px; font-weight: 900; color: var(--text); }
+.h-customer { font-size: 11px; font-weight: 600; color: var(--text2); }
+.h-date { font-size: 10px; color: var(--text3); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Mobile */
+@media (max-width: 900px) {
+  .pos-content { flex-direction: column; }
+  .cart-panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 200; transform: translateX(100%); width: 100%; border-radius: 0; }
+  .cart-panel.open { transform: translateX(0); }
+  .cart-close { display: block; }
+}
+
+.cart-toggle {
+  position: fixed; bottom: 30px; right: 30px; width: 64px; height: 64px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none; font-size: 28px;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.5); z-index: 100; cursor: pointer;
+}
+.cart-badge {
+  position: absolute; top: 0; right: 0; background: var(--red); color: #fff;
+  font-size: 11px; font-weight: 900; min-width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg);
+}
+
+/* Modals */
+.modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal-card { background: var(--surface); border-radius: 24px; width: 100%; max-width: 600px; display: flex; flex-direction: column; max-height: 90vh; }
+.modal-head { padding: 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-head h3 { font-size: 18px; font-weight: 900; }
+.modal-head button { background: none; border: none; font-size: 24px; color: var(--text3); cursor: pointer; }
+.modal-body { flex: 1; overflow-y: auto; padding: 24px; }
+
+.detail-summary { display: flex; justify-content: space-between; margin-bottom: 24px; }
+.detail-group label { display: block; font-size: 10px; font-weight: 800; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+.detail-group p { font-size: 14px; font-weight: 700; color: var(--text); }
+
+.electronic-card { background: var(--text); color: #fff; padding: 20px; border-radius: 20px; margin-bottom: 24px; }
+.e-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.e-status { font-size: 10px; font-weight: 800; padding: 4px 10px; background: rgba(255,255,255,0.1); border-radius: 50px; }
+.e-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.e-actions button { padding: 10px; border-radius: 12px; border: none; background: rgba(255,255,255,0.1); color: #fff; font-weight: 800; cursor: pointer; }
+
+.modal-items { display: flex; flex-direction: column; gap: 12px; }
+.m-item { display: flex; align-items: center; gap: 16px; padding: 12px; background: var(--surface2); border-radius: 16px; }
+.m-qty { width: 40px; height: 40px; border-radius: 10px; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+.m-info { flex: 1; }
+.m-name { font-size: 13px; font-weight: 700; }
+.m-dim { font-size: 10px; color: var(--text2); font-weight: 600; margin-top: 2px; }
+.m-total { font-size: 14px; font-weight: 800; }
+
+.modal-foot { padding: 24px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.m-grand-total label { font-size: 10px; font-weight: 800; color: var(--text3); text-transform: uppercase; }
+.m-grand-total p { font-size: 24px; font-weight: 900; color: var(--text); }
+.m-actions { display: flex; gap: 10px; }
+.btn-annul { padding: 12px 24px; border-radius: 16px; border: none; background: var(--red); color: #fff; font-weight: 800; cursor: pointer; }
+.btn-close { padding: 12px 24px; border-radius: 16px; border: none; background: var(--text); color: #fff; font-weight: 800; cursor: pointer; }
+
+.modal-mini { background: var(--surface); padding: 24px; border-radius: 24px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 16px; }
+.modal-select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface2); font-weight: 700; }
+.btn-confirm { padding: 12px; border-radius: 12px; border: none; background: var(--red); color: #fff; font-weight: 800; }
+
+.warning-card { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; background: var(--surface); border-radius: 32px; border: 1px solid var(--border); padding: 48px; }
+.warning-icon { width: 80px; height: 80px; border-radius: 24px; background: var(--red-dim); color: var(--red); display: flex; align-items: center; justify-content: center; font-size: 40px; }
+.btn-primary { padding: 14px 32px; border-radius: 16px; border: none; background: var(--accent); color: #fff; font-weight: 800; cursor: pointer; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+
+/* Quick Customer Registration Styles */
+.btn-add-customer {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; border-radius: 10px; border: none;
+  background: var(--accent-dim); color: var(--accent); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+}
+.btn-add-customer:hover { background: var(--accent); color: #fff; }
+
+.customer-form { display: flex; flex-direction: column; gap: 16px; }
+.form-row { display: flex; gap: 12px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.form-group label { font-size: 11px; font-weight: 800; color: var(--text3); text-transform: uppercase; }
+.modal-input {
+  width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid var(--border);
+  background: var(--surface2); font-family: inherit; font-size: 13px; outline: none; transition: all 0.2s;
+}
+.modal-input:focus { border-color: var(--accent); background: #fff; }
+
+.input-search-group { position: relative; display: flex; }
+.btn-search-api {
+  position: absolute; right: 6px; top: 6px; bottom: 6px; width: 34px;
+  border-radius: 8px; border: none; background: var(--text); color: #fff;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.btn-search-api:disabled { opacity: 0.5; }
+
+.btn-cancel { padding: 12px 24px; border-radius: 16px; border: 1px solid var(--border); background: #fff; font-weight: 800; cursor: pointer; }
+.btn-save-customer { flex: 1; padding: 12px 24px; border-radius: 16px; border: none; background: var(--green); color: #fff; font-weight: 800; cursor: pointer; }
+.btn-save-customer:disabled { opacity: 0.5; }
+
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }
+
+.animate-pop { animation: pop 0.3s ease-out; }
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+  100% { transform: scale(1); }
 }
 </style>

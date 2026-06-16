@@ -32,6 +32,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: veterinaria_backend
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     env_file:
       - .env
     ports:

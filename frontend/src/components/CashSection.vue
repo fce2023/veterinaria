@@ -1,34 +1,44 @@
 <template>
   <div class="flex flex-col h-full space-y-6">
     <!-- Header Summary -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-4">
         <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-          <i class="pi pi-wallet text-xl"></i>
+          <i class="ti ti-wallet text-xl"></i>
         </div>
         <div>
-          <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Saldo en Caja</p>
-          <p class="text-xl font-black text-slate-900">S/. {{ currentBalance.toFixed(2) }}</p>
+          <p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Saldo Efectivo</p>
+          <p class="text-lg font-black text-slate-900">S/. {{ currentBalance.toFixed(2) }}</p>
         </div>
       </div>
       
-      <div class="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center gap-4">
+      <div class="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-4">
         <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-          <i class="pi pi-shopping-cart text-xl"></i>
+          <i class="ti ti-cash text-xl"></i>
         </div>
         <div>
-          <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Ventas del Turno</p>
-          <p class="text-xl font-black text-slate-900">S/. {{ (activeSession?.total_ventas_efe || 0).toFixed(2) }}</p>
+          <p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Ventas Efectivo</p>
+          <p class="text-lg font-black text-slate-900">S/. {{ (activeSession?.total_ventas_efe || 0).toFixed(2) }}</p>
         </div>
       </div>
 
-      <div class="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center gap-4">
-        <div :class="['w-12 h-12 rounded-2xl flex items-center justify-center', activeSession ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600']">
-          <i :class="['pi', activeSession ? 'pi-lock-open' : 'pi-lock']"></i>
+      <div class="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-4">
+        <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center">
+          <i class="ti ti-credit-card text-xl"></i>
         </div>
         <div>
-          <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Estado</p>
-          <p class="text-sm font-black text-slate-900 uppercase">{{ activeSession ? 'Caja Abierta' : 'Caja Cerrada' }}</p>
+          <p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Ventas Otros</p>
+          <p class="text-lg font-black text-slate-900">S/. {{ (activeSession?.total_ventas_otr || 0).toFixed(2) }}</p>
+        </div>
+      </div>
+
+      <div class="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-4">
+        <div :class="['w-12 h-12 rounded-2xl flex items-center justify-center', activeSession ? 'bg-indigo-50 text-indigo-600' : 'bg-red-50 text-red-600']">
+          <i :class="['ti', activeSession ? 'ti-lock-open' : 'ti-lock']"></i>
+        </div>
+        <div>
+          <p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Estado</p>
+          <p class="text-xs font-black text-slate-900 uppercase">{{ activeSession ? 'Caja Abierta' : 'Caja Cerrada' }}</p>
         </div>
       </div>
     </div>
@@ -40,7 +50,7 @@
         @click="showOpenModal = true"
         class="px-8 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-500 transition-all flex items-center gap-2"
       >
-        <i class="pi pi-plus-circle"></i> Apertura de Caja
+        <i class="ti ti-plus"></i> Apertura de Caja
       </button>
 
       <template v-else>
@@ -48,21 +58,21 @@
           @click="showCloseModal = true"
           class="px-8 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all flex items-center gap-2"
         >
-          <i class="pi pi-lock"></i> Cerrar Caja (Arqueo)
+          <i class="ti ti-lock"></i> Cerrar Caja (Arqueo)
         </button>
 
         <button 
           @click="openMovementModal('INGRESO')"
           class="px-8 py-3 bg-white border border-slate-200 text-emerald-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-50 transition-all flex items-center gap-2"
         >
-          <i class="pi pi-arrow-up"></i> Ingreso de Efectivo
+          <i class="ti ti-arrow-up"></i> Ingreso de Efectivo
         </button>
 
         <button 
           @click="openMovementModal('EGRESO')"
           class="px-8 py-3 bg-white border border-slate-200 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all flex items-center gap-2"
         >
-          <i class="pi pi-arrow-down"></i> Salida / Gasto
+          <i class="ti ti-arrow-down"></i> Salida / Gasto
         </button>
       </template>
     </div>
@@ -112,7 +122,7 @@
           </tbody>
         </table>
         <div v-if="sessions.length === 0" class="p-12 text-center text-slate-300">
-          <i class="pi pi-inbox text-4xl mb-2"></i>
+          <i class="ti ti-inbox text-4xl mb-2"></i>
           <p class="text-xs font-bold uppercase">No hay registros de caja</p>
         </div>
       </div>
@@ -128,11 +138,14 @@
         <div class="space-y-4">
           <div>
             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monto Inicial (S/.)</label>
-            <input 
-              v-model.number="openForm.saldo_inicial"
-              type="number" 
-              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-            />
+            <div class="relative">
+              <i class="ti ti-coin absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input 
+                v-model.number="openForm.saldo_inicial"
+                type="number" 
+                class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+              />
+            </div>
           </div>
           <div class="flex gap-3 pt-4">
             <button @click="showOpenModal = false" class="flex-1 py-3 text-[10px] font-black uppercase text-slate-400 hover:text-slate-600">Cancelar</button>
@@ -151,21 +164,28 @@
         <div class="space-y-4">
           <div class="bg-slate-50 p-4 rounded-2xl space-y-2 mb-4">
             <div class="flex justify-between text-xs font-bold text-slate-600">
-              <span>Monto Esperado:</span>
-              <span>S/. {{ currentBalance.toFixed(2) }}</span>
+              <span>Efectivo Esperado:</span>
+              <span class="text-indigo-600">S/. {{ currentBalance.toFixed(2) }}</span>
             </div>
-            <div class="text-[9px] text-slate-400">
-              (Inicial + Ventas Efe + Ingresos - Egresos)
+            <div class="flex justify-between text-xs font-bold text-slate-600">
+              <span>Total Ventas (Todo):</span>
+              <span>S/. {{ ((activeSession?.total_ventas_efe || 0) + (activeSession?.total_ventas_otr || 0)).toFixed(2) }}</span>
+            </div>
+            <div class="text-[9px] text-slate-400 border-t border-slate-200 pt-2">
+              (Efectivo Esperado = Inicial + Ventas Efe + Ingresos - Egresos)
             </div>
           </div>
 
           <div>
             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monto Físico Contado (S/.)</label>
-            <input 
-              v-model.number="closeForm.saldo_final_real"
-              type="number" 
-              class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-            />
+            <div class="relative">
+              <i class="ti ti-cash absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input 
+                v-model.number="closeForm.saldo_final_real"
+                type="number" 
+                class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+              />
+            </div>
           </div>
 
           <div>
@@ -174,6 +194,7 @@
               v-model="closeForm.notas"
               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
               rows="3"
+              placeholder="Alguna observación sobre el arqueo..."
             ></textarea>
           </div>
 
@@ -193,20 +214,27 @@
         <div class="space-y-4 mt-6">
           <div>
             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monto (S/.)</label>
-            <input 
-              v-model.number="movementForm.monto"
-              type="number" 
-              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-            />
+            <div class="relative">
+              <i class="ti ti-coin absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input 
+                v-model.number="movementForm.monto"
+                type="number" 
+                class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-lg font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+              />
+            </div>
           </div>
 
           <div>
             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Motivo / Descripción</label>
-            <input 
-              v-model="movementForm.motivo"
-              type="text" 
-              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-            />
+            <div class="relative">
+              <i class="ti ti-note absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input 
+                v-model="movementForm.motivo"
+                type="text" 
+                class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                placeholder="Ej. Pago de luz, Compra de suministros..."
+              />
+            </div>
           </div>
 
           <div class="flex gap-3 pt-4">

@@ -244,31 +244,52 @@
               <th class="py-3 px-4 text-right">IGV</th>
               <th class="py-3 px-4 text-right">Total</th>
               <th class="py-3 px-4 text-center">Estado</th>
-              <th class="py-3 px-4 text-center">Detalle</th>
+              <th class="py-3 px-4 text-center">Acciones</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 text-xs text-slate-700">
             <tr v-for="p in purchases" :key="p.id" class="hover:bg-slate-50/50">
               <td class="py-3.5 px-4">
-                <div class="font-mono font-bold text-slate-900">COMPRA-{{ p.id.substring(0, 8) }}</div>
+                <div class="flex items-center gap-1.5">
+                  <div class="font-mono font-bold text-slate-900">COMPRA-{{ p.id.substring(0, 8) }}</div>
+                  <span v-if="p.comprobante_url || (p.attachments && p.attachments.length > 0)" title="Comprobante Adjunto" class="text-emerald-600 flex items-center">
+                    <i class="pi pi-paperclip text-[10px]"></i>
+                    <span v-if="p.attachments && p.attachments.length > 0" class="text-[9px] font-bold ml-0.5">({{ p.attachments.length }})</span>
+                  </span>
+                </div>
                 <div class="text-[10px] text-slate-400 mt-0.5">{{ formatDate(p.fecha) }}</div>
               </td>
-              <td class="py-3.5 px-4 font-semibold text-slate-900">{{ p.supplier?.razon_social || '-' }}</td>
+              <td class="py-3.5 px-4 font-semibold text-slate-900">
+                <div>{{ p.supplier?.razon_social || '-' }}</div>
+                <div v-if="p.tipo_comprobante" class="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                  {{ p.tipo_comprobante }} {{ p.numero_comprobante ? 'N° ' + p.numero_comprobante : '' }}
+                </div>
+              </td>
               <td class="py-3.5 px-4 text-right font-mono text-slate-500">S/. {{ p.subtotal.toFixed(2) }}</td>
               <td class="py-3.5 px-4 text-right font-mono text-slate-500">S/. {{ p.igv.toFixed(2) }}</td>
               <td class="py-3.5 px-4 text-right font-mono font-bold text-slate-900">S/. {{ p.total.toFixed(2) }}</td>
               <td class="py-3.5 px-4 text-center">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {{ p.estado }}
+                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border', getEstadoClass(p.estado)]">
+                  {{ getEstadoLabel(p.estado) }}
                 </span>
               </td>
               <td class="py-3.5 px-4 text-center">
-                <button
-                  @click="viewDetails(p.id)"
-                  class="text-sky-600 hover:text-sky-800 p-1 hover:bg-sky-50 rounded-lg transition-all"
-                >
-                  <i class="pi pi-eye"></i>
-                </button>
+                <div class="flex items-center justify-center gap-1">
+                  <button
+                    @click="viewDetails(p.id)"
+                    title="Ver Detalle"
+                    class="text-sky-600 hover:text-sky-800 p-1.5 hover:bg-sky-50 rounded-lg transition-all"
+                  >
+                    <i class="pi pi-eye"></i>
+                  </button>
+                  <button
+                    @click="openEditModal(p)"
+                    title="Editar Compra / Registrar Comprobante"
+                    class="text-amber-600 hover:text-amber-850 p-1.5 hover:bg-amber-50 rounded-lg transition-all"
+                  >
+                    <i class="pi pi-pencil"></i>
+                  </button>
+                </div>
               </td>
             </tr>
             <tr v-if="purchases.length === 0">
@@ -295,10 +316,56 @@
           <div>
             <div><strong>Proveedor:</strong> {{ selectedPurchase?.purchase?.supplier?.razon_social }}</div>
             <div><strong>RUC:</strong> {{ selectedPurchase?.purchase?.supplier?.ruc }}</div>
+            <div class="mt-2" v-if="selectedPurchase?.purchase?.tipo_comprobante || selectedPurchase?.purchase?.numero_comprobante">
+              <strong>Comprobante:</strong>
+              <span class="ml-1 font-bold text-slate-800 uppercase text-[10px]">
+                {{ selectedPurchase?.purchase?.tipo_comprobante || '-' }}
+                {{ selectedPurchase?.purchase?.numero_comprobante ? 'N° ' + selectedPurchase?.purchase?.numero_comprobante : '' }}
+              </span>
+            </div>
           </div>
           <div class="text-right">
             <div><strong>Fecha:</strong> {{ formatDate(selectedPurchase?.purchase?.fecha) }}</div>
             <div><strong>Total General:</strong> S/. {{ selectedPurchase?.purchase?.total.toFixed(2) }}</div>
+            <div class="mt-2" v-if="selectedPurchase?.purchase?.comprobante_url">
+              <strong>Documento:</strong>
+              <a
+                :href="selectedPurchase.purchase.comprobante_url"
+                target="_blank"
+                class="ml-1.5 inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 font-extrabold uppercase tracking-wider text-[10px]"
+              >
+                <i class="pi pi-file-pdf"></i> Ver Adjunto
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Multiple attachments in Details Modal -->
+        <div class="mt-4 border-t border-slate-100 pt-4" v-if="selectedPurchase?.purchase?.attachments?.length > 0">
+          <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">Comprobantes / Archivos Adjuntos</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+            <div
+              v-for="att in selectedPurchase.purchase.attachments"
+              :key="att.id"
+              class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+            >
+              <div class="flex flex-col gap-0.5 text-slate-700 truncate pr-2">
+                <div class="flex items-center gap-2 text-xs truncate">
+                  <i :class="['pi text-sm', isImageFile(att.url) ? 'pi-image text-emerald-600' : 'pi-file-pdf text-rose-600']"></i>
+                  <span class="font-medium truncate" :title="att.nombre">{{ att.nombre }}</span>
+                </div>
+                <span v-if="att.descripcion" class="text-[10px] text-slate-400 font-normal truncate pl-6" :title="att.descripcion">
+                  {{ att.descripcion }}
+                </span>
+              </div>
+              <a
+                :href="att.url"
+                target="_blank"
+                class="text-[10px] font-black text-emerald-600 hover:text-emerald-800 uppercase tracking-wider flex items-center gap-1 shrink-0"
+              >
+                <i class="pi pi-external-link text-[8px]"></i> Ver
+              </a>
+            </div>
           </div>
         </div>
 
@@ -332,6 +399,428 @@
           >
             Cerrar Detalle
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Purchase Modal -->
+    <div v-if="showEditModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-3.5 mb-4">
+          <h3 class="text-base font-extrabold text-slate-900">
+            Editar Compra
+          </h3>
+          <button @click="showEditModal = false" class="text-slate-400 hover:text-slate-600">
+            <i class="pi pi-times"></i>
+          </button>
+        </div>
+
+        <form @submit.prevent="submitEdit" class="space-y-4 overflow-y-auto pr-1 flex-1">
+          <!-- Supplier Select -->
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1.5">Proveedor</label>
+            <select
+              v-model="editForm.supplier_id"
+              required
+              class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+            >
+              <option value="">-- Seleccionar Proveedor --</option>
+              <option v-for="sup in suppliers" :key="sup.id" :value="sup.id">
+                {{ sup.razon_social }} (RUC: {{ sup.ruc }})
+              </option>
+            </select>
+          </div>
+
+          <!-- Date and Status -->
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Fecha</label>
+              <input
+                v-model="editForm.fecha"
+                type="date"
+                required
+                class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Estado</label>
+              <select
+                v-model="editForm.estado"
+                required
+                class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+              >
+                <option value="draft">Borrador</option>
+                <option value="completed">Completado</option>
+                <option value="cancelled">Cancelado</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Voucher Details -->
+          <div class="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Tipo de Comprobante</label>
+              <select
+                v-model="editForm.tipo_comprobante"
+                class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+              >
+                <option value="">-- Ninguno / Sin registrar --</option>
+                <option value="FACTURA">FACTURA</option>
+                <option value="BOLETA">BOLETA</option>
+                <option value="GUIA_REMISION">GUÍA DE REMISIÓN</option>
+                <option value="NOTA_VENTA">NOTA DE VENTA</option>
+                <option value="OTRO">OTRO</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Número de Comprobante</label>
+              <input
+                v-model="editForm.numero_comprobante"
+                type="text"
+                placeholder="Ej. F001-12345"
+                class="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          <!-- Saved Attachments (includes legacy comprobante_url if present) -->
+          <div v-if="(editForm.attachments && editForm.attachments.length > 0) || editForm.comprobante_url" class="space-y-2 border-t border-slate-100 pt-4">
+            <label class="block text-xs font-bold text-slate-600">Archivos Adjuntos Guardados</label>
+            <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              <!-- Legacy single file -->
+              <div
+                v-if="editForm.comprobante_url"
+                class="flex items-center justify-between bg-sky-50 border border-sky-100 rounded-xl px-3 py-2 text-xs"
+              >
+                <div class="flex items-center gap-2 text-sky-800 truncate pr-2">
+                  <i class="pi pi-file text-sm text-sky-600"></i>
+                  <span class="font-medium truncate">Comprobante Principal</span>
+                </div>
+                <a
+                  :href="editForm.comprobante_url"
+                  target="_blank"
+                  class="text-[10px] font-black text-sky-700 hover:text-sky-900 uppercase tracking-wider flex items-center gap-1 shrink-0"
+                >
+                  <i class="pi pi-external-link text-[8px]"></i> Ver
+                </a>
+              </div>
+
+              <!-- Multiple attachments -->
+              <div
+                v-for="att in editForm.attachments"
+                :key="att.id"
+                class="flex items-center justify-between bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl px-3 py-2 text-xs transition-colors"
+              >
+                <div class="flex flex-col gap-0.5 text-slate-700 truncate pr-2">
+                  <div class="flex items-center gap-2 text-xs truncate">
+                    <i :class="['pi text-sm', isImageFile(att.url) ? 'pi-image text-emerald-600' : 'pi-file-pdf text-rose-600']"></i>
+                    <span class="font-medium truncate" :title="att.nombre">{{ att.nombre }}</span>
+                  </div>
+                  <span v-if="att.descripcion" class="text-[10px] text-slate-400 font-normal truncate pl-6" :title="att.descripcion">
+                    {{ att.descripcion }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <a
+                    :href="att.url"
+                    target="_blank"
+                    class="text-sky-600 hover:text-sky-850 p-1 hover:bg-sky-50 rounded-lg transition-all"
+                  >
+                    <i class="pi pi-external-link text-xs"></i>
+                  </a>
+                  <button
+                    type="button"
+                    @click="deleteAttachment(att.id)"
+                    class="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded-lg transition-all"
+                  >
+                    <i class="pi pi-trash text-xs"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- File Upload -->
+          <div class="border-t border-slate-100 pt-4 space-y-3">
+            <label class="block text-xs font-bold text-slate-600">Subir Nuevo Archivo (PDF, Fotos, etc.)</label>
+            
+            <div class="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tipo de Archivo</label>
+                  <select
+                    v-model="uploadDocType"
+                    class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="FACTURA">FACTURA</option>
+                    <option value="BOLETA">BOLETA</option>
+                    <option value="GUIA_REMISION">GUÍA DE REMISIÓN</option>
+                    <option value="NOTA_VENTA">NOTA DE VENTA</option>
+                    <option value="OTRO">OTRO</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Doc.</label>
+                  <input
+                    v-model="uploadDocNumber"
+                    type="text"
+                    placeholder="Ej. F001-123"
+                    class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Descripción del Archivo (Opcional)</label>
+                <input
+                  v-model="uploadDocDesc"
+                  type="text"
+                  placeholder="Ej. Factura de compra de insumos, guía de remisión de materiales..."
+                  class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <input
+                ref="attachmentInputRef"
+                type="file"
+                accept="application/pdf, image/*"
+                @change="uploadAttachment"
+                class="hidden"
+              />
+              <input
+                ref="cameraInputRef"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                @change="uploadAttachment"
+                class="hidden"
+              />
+              <div class="border-2 border-dashed border-slate-300 rounded-xl p-4 transition-all bg-slate-50/50 flex flex-col items-center justify-center gap-3">
+                <span class="text-xs font-semibold text-slate-600">Selecciona el método de carga</span>
+                
+                <div class="flex gap-3 w-full">
+                  <!-- File upload button -->
+                  <button
+                    type="button"
+                    @click="attachmentInputRef?.click()"
+                    :disabled="uploadingAttachment"
+                    class="flex-1 py-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl text-slate-700 hover:text-emerald-700 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <i class="pi pi-file text-lg text-slate-500"></i>
+                    <span>Subir Archivo / PDF</span>
+                  </button>
+
+                  <!-- Camera photo button -->
+                  <button
+                    type="button"
+                    @click="cameraInputRef?.click()"
+                    :disabled="uploadingAttachment"
+                    class="flex-1 py-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl text-slate-700 hover:text-emerald-700 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <i class="pi pi-camera text-lg text-emerald-600"></i>
+                    <span>Tomar Foto</span>
+                  </button>
+                </div>
+
+                <!-- Uploading spinner/status -->
+                <div v-if="uploadingAttachment" class="flex items-center gap-2 text-xs font-semibold text-emerald-600 mt-1">
+                  <i class="pi pi-spin pi-spinner text-lg"></i>
+                  <span>Cargando y optimizando...</span>
+                </div>
+                
+                <span v-else class="text-[10px] text-slate-400 text-center">PDF, PNG, JPG, JPEG, GIF (Imágenes se optimizan automáticamente)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              @click="showEditModal = false"
+              class="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              :disabled="savingEdit"
+              class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+            >
+              <i v-if="savingEdit" class="pi pi-spin pi-spinner"></i>
+              <i v-else class="pi pi-check"></i>
+              <span>Guardar Cambios</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Post Create Upload Modal -->
+    <div v-if="showPostCreateUploadModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] space-y-5">
+        <!-- Success Header -->
+        <div class="text-center space-y-2">
+          <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-xl shadow-sm">
+            <i class="pi pi-check"></i>
+          </div>
+          <h3 class="text-base font-extrabold text-slate-900">¡Compra Registrada con Éxito!</h3>
+          <p class="text-xs text-slate-500">La compra ha sido guardada en el sistema. ¿Deseas subir comprobantes o adjuntos ahora mismo de forma opcional?</p>
+        </div>
+
+        <!-- Yes / No Choice Buttons if uploader not shown yet -->
+        <div v-if="!showPostCreateUploader" class="flex gap-3 pt-2">
+          <button
+            @click="closePostCreateModal(false)"
+            class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+          >
+            No, Registrar Otra
+          </button>
+          <button
+            @click="showPostCreateUploader = true"
+            class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+          >
+            <i class="pi pi-upload"></i>
+            <span>Sí, Subir Archivos</span>
+          </button>
+        </div>
+
+        <!-- Uploader Section (if they clicked Yes) -->
+        <div v-else class="space-y-4 overflow-y-auto pr-1 flex-1">
+          <!-- List of uploaded files so far -->
+          <div v-if="editForm.attachments.length > 0" class="space-y-2">
+            <label class="block text-xs font-bold text-slate-600">Archivos Adjuntos Subidos</label>
+            <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+              <div
+                v-for="att in editForm.attachments"
+                :key="att.id"
+                class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+              >
+                <div class="flex flex-col gap-0.5 text-slate-700 truncate pr-2">
+                  <div class="flex items-center gap-2 text-xs truncate">
+                    <i :class="['pi text-sm', isImageFile(att.url) ? 'pi-image text-emerald-600' : 'pi-file-pdf text-rose-600']"></i>
+                    <span class="font-medium truncate" :title="att.nombre">{{ att.nombre }}</span>
+                  </div>
+                  <span v-if="att.descripcion" class="text-[10px] text-slate-400 font-normal truncate pl-6" :title="att.descripcion">
+                    {{ att.descripcion }}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  @click="deleteAttachment(att.id)"
+                  class="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <i class="pi pi-trash text-xs"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Uploader fields and area -->
+          <div class="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tipo de Archivo</label>
+                <select
+                  v-model="uploadDocType"
+                  class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="FACTURA">FACTURA</option>
+                  <option value="BOLETA">BOLETA</option>
+                  <option value="GUIA_REMISION">GUÍA DE REMISIÓN</option>
+                  <option value="NOTA_VENTA">NOTA DE VENTA</option>
+                  <option value="OTRO">OTRO</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Doc.</label>
+                <input
+                  v-model="uploadDocNumber"
+                  type="text"
+                  placeholder="Ej. F001-123"
+                  class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Descripción del Archivo (Opcional)</label>
+              <input
+                v-model="uploadDocDesc"
+                type="text"
+                placeholder="Ej. Factura de compra de insumos, guía de remisión de materiales..."
+                class="block w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <input
+              ref="postCreateAttachmentInputRef"
+              type="file"
+              accept="application/pdf, image/*"
+              @change="uploadAttachment"
+              class="hidden"
+            />
+            <input
+              ref="postCreateCameraInputRef"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              @change="uploadAttachment"
+              class="hidden"
+            />
+            <div class="border-2 border-dashed border-slate-300 rounded-xl p-4 transition-all bg-slate-50/50 flex flex-col items-center justify-center gap-3">
+              <span class="text-xs font-semibold text-slate-600">Selecciona el método de carga</span>
+              
+              <div class="flex gap-3 w-full">
+                <!-- File upload button -->
+                <button
+                  type="button"
+                  @click="postCreateAttachmentInputRef?.click()"
+                  :disabled="uploadingAttachment"
+                  class="flex-1 py-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl text-slate-700 hover:text-emerald-700 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <i class="pi pi-file text-lg text-slate-500"></i>
+                  <span>Subir Archivo / PDF</span>
+                </button>
+
+                <!-- Camera photo button -->
+                <button
+                  type="button"
+                  @click="postCreateCameraInputRef?.click()"
+                  :disabled="uploadingAttachment"
+                  class="flex-1 py-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl text-slate-700 hover:text-emerald-700 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <i class="pi pi-camera text-lg text-emerald-600"></i>
+                  <span>Tomar Foto</span>
+                </button>
+              </div>
+
+              <!-- Uploading spinner/status -->
+              <div v-if="uploadingAttachment" class="flex items-center gap-2 text-xs font-semibold text-emerald-600 mt-1">
+                <i class="pi pi-spin pi-spinner text-lg"></i>
+                <span>Cargando y optimizando...</span>
+              </div>
+              
+              <span v-else class="text-[10px] text-slate-400 text-center">PDF, PNG, JPG, JPEG, GIF (Imágenes se optimizan automáticamente)</span>
+            </div>
+          </div>
+
+          <!-- Done / Go to History Buttons -->
+          <div class="flex gap-2 pt-3 border-t border-slate-100">
+            <button
+              @click="closePostCreateModal(false)"
+              class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all text-center"
+            >
+              Registrar Otra Compra
+            </button>
+            <button
+              @click="closePostCreateModal(true)"
+              class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all text-center shadow-sm"
+            >
+              Ver Historial
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -495,6 +984,35 @@ const itemInput = reactive({
 
 const showModal = ref(false)
 const selectedPurchase = ref<any>(null)
+
+// Edit purchase modal refs
+const showEditModal = ref(false)
+const savingEdit = ref(false)
+const editFile = ref<File | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const uploadingAttachment = ref(false)
+const attachmentInputRef = ref<HTMLInputElement | null>(null)
+const cameraInputRef = ref<HTMLInputElement | null>(null)
+const uploadDocType = ref('FACTURA')
+const uploadDocNumber = ref('')
+const uploadDocDesc = ref('')
+
+// Post create upload modal refs
+const showPostCreateUploadModal = ref(false)
+const showPostCreateUploader = ref(false)
+const newlyCreatedPurchase = ref<any>(null)
+const postCreateAttachmentInputRef = ref<HTMLInputElement | null>(null)
+const postCreateCameraInputRef = ref<HTMLInputElement | null>(null)
+const editForm = reactive({
+  id: '',
+  supplier_id: '',
+  fecha: '',
+  estado: '',
+  tipo_comprobante: '',
+  numero_comprobante: '',
+  comprobante_url: '',
+  attachments: [] as any[]
+})
 
 // Focus ref handlers
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -699,17 +1217,46 @@ function clearForm() {
 
 async function submitPurchase() {
   if (!purchaseForm.supplier_id || purchaseForm.items.length === 0) return
-  
+
   try {
     const res = await axios.post('/purchases', purchaseForm)
     if (res.data.success) {
-      alert('¡Compra registrada con éxito!')
+      const p = res.data.data
+      newlyCreatedPurchase.value = p
+
+      // Clear main registration form
       clearForm()
-      activeSubTab.value = 'history'
-      loadPurchases()
+
+      // Initialize editForm for uploader reuse
+      editForm.id = p.id
+      editForm.supplier_id = p.supplier_id
+      editForm.tipo_comprobante = p.tipo_comprobante || 'FACTURA'
+      editForm.numero_comprobante = p.numero_comprobante || ''
+      editForm.comprobante_url = ''
+      editForm.attachments = []
+
+      // Pre-fill uploader type and number
+      uploadDocType.value = p.tipo_comprobante || 'FACTURA'
+      uploadDocNumber.value = p.numero_comprobante || ''
+
+      // Show the post-create modal
+      showPostCreateUploadModal.value = true
     }
   } catch (err) {
     alert('Error al registrar la compra')
+  }
+}
+
+function closePostCreateModal(goToHistory: boolean) {
+  showPostCreateUploadModal.value = false
+  showPostCreateUploader.value = false
+  newlyCreatedPurchase.value = null
+
+  if (goToHistory) {
+    activeSubTab.value = 'history'
+    loadPurchases()
+  } else {
+    activeSubTab.value = 'create'
   }
 }
 
@@ -722,6 +1269,162 @@ async function viewDetails(id: string) {
     }
   } catch (err) {
     alert('Error al cargar detalles de la compra')
+  }
+}
+
+function openEditModal(purchase: any) {
+  editForm.id = purchase.id
+  editForm.supplier_id = purchase.supplier_id || ''
+  editForm.estado = purchase.estado || 'draft'
+  editForm.tipo_comprobante = purchase.tipo_comprobante || ''
+  editForm.numero_comprobante = purchase.numero_comprobante || ''
+  editForm.comprobante_url = purchase.comprobante_url || ''
+  editForm.attachments = purchase.attachments ? [...purchase.attachments] : []
+
+  // Pre-populate upload controls with the purchase's current document metadata
+  uploadDocType.value = purchase.tipo_comprobante || 'FACTURA'
+  uploadDocNumber.value = purchase.numero_comprobante || ''
+
+  if (purchase.fecha) {
+    const dateObj = new Date(purchase.fecha)
+    const year = dateObj.getFullYear()
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+    const day = String(dateObj.getDate()).padStart(2, '0')
+    editForm.fecha = `${year}-${month}-${day}`
+  } else {
+    editForm.fecha = ''
+  }
+
+  editFile.value = null
+  showEditModal.value = true
+}
+
+function handleFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    editFile.value = target.files[0]
+  }
+}
+
+async function uploadAttachment(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (!target.files || target.files.length === 0) return
+  const file = target.files[0]
+
+  uploadingAttachment.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('tipo_documento', uploadDocType.value)
+    formData.append('numero_documento', uploadDocNumber.value)
+    formData.append('descripcion', uploadDocDesc.value)
+
+    const res = await axios.post(`/purchases/${editForm.id}/attachments`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+
+    if (res.data.success) {
+      editForm.attachments.push(res.data.data)
+      const found = purchases.value.find(p => p.id === editForm.id)
+      if (found) {
+        if (!found.attachments) found.attachments = []
+        found.attachments.push(res.data.data)
+      }
+      // Reset document number and description for the next file
+      uploadDocNumber.value = ''
+      uploadDocDesc.value = ''
+    }
+  } catch (err: any) {
+    console.error('Error uploading file:', err)
+    const errMsg = err.response?.data?.error || 'Error al subir el archivo'
+    alert(errMsg)
+  } finally {
+    uploadingAttachment.value = false
+    if (target) target.value = ''
+  }
+}
+
+async function deleteAttachment(attachmentId: string) {
+  if (!confirm('¿Estás seguro de que deseas eliminar este comprobante adjunto?')) return
+
+  try {
+    const res = await axios.delete(`/purchases/${editForm.id}/attachments/${attachmentId}`)
+    if (res.data.success) {
+      editForm.attachments = editForm.attachments.filter(att => att.id !== attachmentId)
+      const found = purchases.value.find(p => p.id === editForm.id)
+      if (found && found.attachments) {
+        found.attachments = found.attachments.filter((att: any) => att.id !== attachmentId)
+      }
+    }
+  } catch (err: any) {
+    console.error('Error deleting attachment:', err)
+    const errMsg = err.response?.data?.error || 'Error al eliminar el archivo'
+    alert(errMsg)
+  }
+}
+
+function isImageFile(url: string) {
+  if (!url) return false
+  const ext = url.split('.').pop()?.toLowerCase()
+  return ext && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)
+}
+
+async function submitEdit() {
+  if (!editForm.id) return
+  savingEdit.value = true
+  try {
+    const formData = new FormData()
+    formData.append('supplier_id', editForm.supplier_id)
+    formData.append('fecha', editForm.fecha)
+    formData.append('estado', editForm.estado)
+    formData.append('tipo_comprobante', editForm.tipo_comprobante)
+    formData.append('numero_comprobante', editForm.numero_comprobante)
+
+    if (editFile.value) {
+      formData.append('file', editFile.value)
+    }
+
+    const res = await axios.put(`/purchases/${editForm.id}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+
+    if (res.data.success) {
+      alert('¡Compra actualizada con éxito!')
+      showEditModal.value = false
+      loadPurchases()
+    }
+  } catch (err: any) {
+    console.error('Error updating purchase:', err)
+    const errMsg = err.response?.data?.error || 'Error al actualizar la compra'
+    alert(errMsg)
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+function getEstadoClass(estado: string) {
+  switch (estado) {
+    case 'completed':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'draft':
+      return 'bg-amber-50 text-amber-700 border-amber-200'
+    case 'cancelled':
+      return 'bg-rose-50 text-rose-700 border-rose-200'
+    default:
+      return 'bg-slate-50 text-slate-700 border-slate-200'
+  }
+}
+
+function getEstadoLabel(estado: string) {
+  switch (estado) {
+    case 'completed': return 'Completado'
+    case 'draft': return 'Borrador'
+    case 'cancelled': return 'Cancelado'
+    default: return estado
   }
 }
 

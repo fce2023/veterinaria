@@ -106,6 +106,27 @@
         </div>
 
         <form @submit.prevent="saveConfig" class="biz-form">
+          <div class="form-grid form-grid--2" style="margin-top:20px;">
+            <div class="field">
+              <label class="field-label">Entorno de Emisión (SUNAT)</label>
+              <select v-model="config.modo" class="field-input field-input--select">
+                <option value="dev">Entorno de Pruebas (BETA - Sin Validez)</option>
+                <option value="prod">Entorno de Producción (Legal - Oficial)</option>
+              </select>
+              <p class="field-hint" v-if="config.modo === 'prod'" style="color: #ef4444; font-weight: bold;">¡Atención! Documentos emitidos aquí tienen validez tributaria.</p>
+              <p class="field-hint" v-else>Para realizar pruebas de homologación y desarrollo.</p>
+            </div>
+            <div class="field">
+              <label class="field-label">Modo de Envío</label>
+              <select v-model="config.emision_diferida" class="field-input field-input--select">
+                <option :value="false">Instantáneo (Al cerrar la venta)</option>
+                <option :value="true">Diferido (Al final de la jornada)</option>
+              </select>
+              <p class="field-hint" v-if="config.emision_diferida">Las ventas se guardarán como borradores. Deberás emitirlas manualmente al cerrar el día.</p>
+              <p class="field-hint" v-else>Los comprobantes se envían a SUNAT inmediatamente tras cada venta.</p>
+            </div>
+          </div>
+
           <!-- SOL Credentials -->
           <div class="form-section-label">Credenciales SOL (SUNAT)</div>
           <div class="form-grid form-grid--2">
@@ -371,6 +392,18 @@
             />
           </div>
 
+          <button 
+            v-if="documents.some(d => d.estado === 'draft')" 
+            @click="batchEmitDrafts" 
+            class="btn-primary" 
+            style="background: #2563eb; padding: 0 20px; font-weight: 700; display: flex; align-items: center; gap: 8px;"
+            :disabled="batchEmitting"
+          >
+            <i v-if="batchEmitting" class="ti ti-loader animate-spin"></i>
+            <i v-else class="ti ti-send"></i>
+            Emitir Pendientes (Cierre)
+          </button>
+
           <div class="select-filter-group">
             <select v-model="filterType" @change="loadDocuments" class="filter-select">
               <option value="">Todos los Tipos</option>
@@ -454,13 +487,75 @@
                   <span v-else class="text-slate-400">-</span>
                 </td>
                 <td>
-                  <span :class="['badge', 'badge--' + doc.estado]">
+                  <span 
+                    :class="['badge', 'badge--' + (doc.observaciones && doc.estado === 'accepted' ? 'warning' : doc.estado)]"
+                    @click="showSunatMessage(doc)"
+                    style="cursor: pointer;"
+                    title="Click para ver detalle de SUNAT"
+                  >
                     <span class="badge-dot"></span>
-                    {{ doc.estado.toUpperCase() }}
+                    {{ (doc.observaciones && doc.estado === 'accepted' ? 'OBSERVADO' : doc.estado).toUpperCase() }}
                   </span>
+                  <button
+                    v-if="doc.estado === 'pending' || doc.estado === 'error' || doc.estado === 'rejected'"
+                    type="button"
+                    @click="syncDocumentStatus(doc.id)"
+                    class="sync-status-inline-btn"
+                    title="Actualizar estado desde SUNAT"
+                    :disabled="syncingId === doc.id"
+                  >
+                    <i class="ti ti-refresh" :class="{ 'animate-spin': syncingId === doc.id }"></i>
+                  </button>
                 </td>
+
                 <td class="text-right">
                   <div class="action-btn-group">
+                    <button 
+                      v-if="doc.estado !== 'accepted' && doc.estado !== 'voided'"
+                      type="button"
+                      @click="resendDocument(doc.id)"
+                      class="action-btn action-btn--resend"
+                      title="Intentar enviar nuevamente"
+                      :disabled="resendingId === doc.id"
+                    >
+                      <i v-if="resendingId === doc.id" class="ti ti-loader animate-spin"></i>
+                      <span v-else>Reenviar</span>
+                    </button>
+                    <button 
+                      type="button"
+                      @click="showSunatMessage(doc)"
+                      class="action-btn action-btn--msg"
+                      title="Ver mensajes de SUNAT/API"
+                    >
+                      Mensajes
+                    </button>
+                    <button 
+                      v-if="doc.estado === 'draft'"
+                      type="button"
+                      @click="openEditDraftModal(doc)"
+                      class="action-btn action-btn--edit"
+                      title="Editar datos antes de emitir"
+                    >
+                      Editar
+                    </button>
+                    <button 
+                      v-if="doc.estado === 'accepted' && doc.tipo_documento !== '03' && doc.tipo_documento !== 'NV'"
+                      type="button"
+                      @click="openVoidModal(doc)"
+                      class="action-btn action-btn--void"
+                      title="Solicitar Comunicación de Baja (Anulación Legal)"
+                    >
+                      Anular
+                    </button>
+                    <button 
+                      v-if="(config.modo === 'dev' || config.modo === 'beta') && doc.estado !== 'accepted' && doc.estado !== 'voided'"
+                      type="button"
+                      @click="deleteDocumentTest(doc.id)"
+                      class="action-btn action-btn--void"
+                      title="Eliminar registro (Solo Modo Prueba)"
+                    >
+                      Eliminar
+                    </button>
                     <button 
                       type="button"
                       @click="downloadFile(doc.document_uuid, 'pdf')" 
@@ -492,6 +587,232 @@
             </tbody>
           </table>
         </div>
+
+        <!-- SUNAT Message Modal -->
+        <div v-if="showMsgModal" class="modal-overlay" @click="showMsgModal = false">
+          <div class="modal-mini" @click.stop>
+            <div class="modal-mini-header">
+              <h3 class="modal-mini-title">Mensaje de SUNAT</h3>
+              <button @click="showMsgModal = false" class="modal-close-btn">✕</button>
+            </div>
+            <div class="modal-mini-body">
+              <div v-if="selectedDoc" class="msg-box" :class="'msg-box--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
+                <div class="msg-box-header">
+                  <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
+                    {{ (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'OBSERVADO' : selectedDoc.estado).toUpperCase() }}
+                  </span>
+                  <span class="font-mono text-[11px]">{{ selectedDoc.serie }}-{{ selectedDoc.numero }}</span>
+                </div>
+                
+                <!-- Main Message Content -->
+                <div v-if="selectedDoc.sunat_response || selectedDoc.facturacion_error" class="msg-content">
+                  
+                  <!-- Technical API Error -->
+                  <div v-if="selectedDoc.facturacion_error" class="technical-error">
+                    <p class="font-bold text-red-600 mb-1">Error de Comunicación/Validación:</p>
+                    <pre class="msg-text-raw">{{ cleanErrorMessage(selectedDoc.facturacion_error) }}</pre>
+                  </div>
+
+                  <!-- SUNAT Notes/Observations -->
+                  <div v-if="selectedDoc.sunat_response" class="sunat-notes">
+                    <p v-if="selectedDoc.facturacion_error" class="font-bold text-slate-700 mt-2 mb-1">Respuesta de SUNAT:</p>
+                    <div v-if="selectedDoc.sunat_response.includes('\n')" class="msg-list">
+                      <div v-for="(line, idx) in selectedDoc.sunat_response.split('\n')" :key="idx" class="msg-item">
+                        <span class="msg-item-bullet"></span>
+                        <p class="msg-text">{{ line }}</p>
+                      </div>
+                    </div>
+                    <p v-else class="msg-text">{{ selectedDoc.sunat_response }}</p>
+                  </div>
+
+                </div>
+                <p v-else class="msg-text text-slate-400 italic">No hay mensajes detallados para este comprobante.</p>
+              </div>
+            </div>
+            <div class="modal-mini-footer">
+              <button 
+                v-if="config.modo === 'dev' || config.modo === 'beta'"
+                @click="deleteDocumentTest(selectedDoc.id)"
+                class="btn-danger-outline btn-primary--sm mr-auto"
+              >
+                Eliminar (Prueba)
+              </button>
+              <button 
+                v-if="selectedDoc.estado === 'accepted' && selectedDoc.tipo_documento !== '03' && selectedDoc.tipo_documento !== 'NV'"
+                @click="openVoidModal(selectedDoc)"
+                class="btn-danger btn-primary--sm"
+                style="margin-right: 8px;"
+              >
+                Anular Comprobante
+              </button>
+              <button @click="showMsgModal = false" class="btn-primary btn-primary--sm">Cerrar</button>
+            </div>
+          </div>
+          </div>
+          </div>
+
+    <!-- === MODAL: Editar Borrador (Antes de emitir) === -->
+    <div v-if="isEditDraftModalOpen" class="modal-mini-overlay" @click.self="isEditDraftModalOpen = false">
+      <div class="modal-mini animate-in" style="max-width: 550px;">
+        <div class="modal-mini-header">
+          <h3>Editar Borrador de Comprobante</h3>
+          <button @click="isEditDraftModalOpen = false" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-mini-body">
+          <p style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+            Revisa y corrige los datos antes de la emisión final a SUNAT.
+          </p>
+          
+          <div class="form-section-label">Identificación del Cliente</div>
+          <div class="form-grid form-grid--2">
+            <div class="field">
+              <label class="field-label">Tipo Documento</label>
+              <select v-model="draftForm.tipo_documento_identidad" class="field-input field-input--select">
+                <option value="DNI">DNI</option>
+                <option value="RUC">RUC</option>
+                <option value="CE">Carné de Extranjería</option>
+                <option value="PASAPORTE">Pasaporte</option>
+                <option value="SIN_DOCUMENTO">Sin Documento</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label">Nro. Documento</label>
+              <input v-model="draftForm.numero_documento" type="text" class="field-input" placeholder="Ej. 12345678" />
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label">Nombre / Razón Social <span class="required">*</span></label>
+            <input 
+              v-model="draftForm.razon_social" 
+              type="text" 
+              class="field-input" 
+              placeholder="Nombre legal del cliente..."
+            />
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label">Dirección Fiscal</label>
+            <input 
+              v-model="draftForm.direccion" 
+              type="text" 
+              class="field-input" 
+              placeholder="Opcional..."
+            />
+          </div>
+
+          <div class="form-section-label" style="margin-top: 20px;">Datos del Comprobante</div>
+          <div class="form-grid form-grid--3">
+            <div class="field">
+              <label class="field-label">Serie</label>
+              <input v-model="draftForm.serie" type="text" class="field-input" maxlength="4" style="text-transform: uppercase;" />
+            </div>
+            <div class="field">
+              <label class="field-label">Número</label>
+              <input v-model="draftForm.numero" type="text" class="field-input" />
+            </div>
+            <div class="field">
+              <label class="field-label">Fecha Emisión</label>
+              <input v-model="draftForm.fecha_emision" type="date" class="field-input" />
+            </div>
+          </div>
+          <div class="form-section-label" style="margin-top: 20px;">Detalle de Productos & Servicios</div>
+          <div class="draft-items-table-wrap">
+            <table class="draft-items-table">
+              <thead>
+                <tr>
+                  <th>Descripción</th>
+                  <th width="80">Cant.</th>
+                  <th width="100">Precio (C/IGV)</th>
+                  <th width="100" class="text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in draftForm.items" :key="item.id">
+                  <td class="item-name">{{ item.nombre }}</td>
+                  <td>
+                    <input v-model.number="item.cantidad" type="number" class="item-input" step="0.01" />
+                  </td>
+                  <td>
+                    <input v-model.number="item.precio_unitario" type="number" class="item-input" step="0.01" />
+                  </td>
+                  <td class="text-right item-total">
+                    S/ {{ (item.cantidad * item.precio_unitario).toFixed(2) }}
+                  </td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="3" class="text-right" style="font-weight: 700; padding-top: 12px;">TOTAL COMPROBANTE:</td>
+                  <td class="text-right" style="font-weight: 800; color: #2563eb; font-size: 15px; padding-top: 12px;">
+                    S/ {{ computedDraftTotal.toFixed(2) }}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+        <div class="modal-mini-footer">
+          <button @click="isEditDraftModalOpen = false" class="btn-secondary-mini" style="margin-right: 8px;">Cancelar</button>
+          <button 
+            @click="submitDraftUpdate" 
+            :disabled="editingDraft || !draftForm.razon_social" 
+            class="btn-primary-mini"
+          >
+            <i v-if="editingDraft" class="ti ti-loader animate-spin"></i>
+            Actualizar Borrador
+          </button>
+        </div>
+      </div>
+    </div>
+
+          <!-- === MODAL: Anulación Legal (Baja) === -->
+      <div v-if="isVoidModalOpen" class="modal-mini-overlay" @click.self="isVoidModalOpen = false">
+        <div class="modal-mini animate-in" style="max-width: 450px;">
+          <div class="modal-mini-header" style="background: #fef2f2; border-bottom-color: #fee2e2;">
+            <h3 style="color: #b91c1c;">Solicitar Anulación (Baja)</h3>
+            <button @click="isVoidModalOpen = false" class="modal-close-btn">×</button>
+          </div>
+          <div class="modal-mini-body">
+            <p style="font-size: 13.5px; color: #475569; margin-bottom: 20px; line-height: 1.5;">
+              Estás por anular legalmente la <strong>{{ docToVoid?.serie }}-{{ docToVoid?.numero }}</strong>. 
+              Esta acción enviará una <strong>Comunicación de Baja</strong> a SUNAT.
+            </p>
+            
+            <div class="field">
+              <label class="field-label" style="font-weight: 700; color: #1e293b;">Motivo de Anulación <span class="required">*</span></label>
+              <textarea 
+                v-model="voidReason" 
+                class="field-input" 
+                rows="3" 
+                placeholder="Ej: Error en datos del cliente, Anulación de la operación..."
+                style="resize: none; border-color: #cbd5e1;"
+              ></textarea>
+              <p class="field-hint" style="margin-top: 6px;">Mínimo 10 caracteres.</p>
+            </div>
+
+            <div class="alert-banner alert-banner--warning" style="margin-top:20px; padding: 12px; border-radius: 10px;">
+              <div style="display: flex; gap: 10px;">
+                <i class="ti ti-info-circle" style="font-size: 18px;"></i>
+                <p style="font-size: 12px; line-height: 1.4; margin: 0;">
+                  Esta operación es irreversible. Una vez aceptada la baja por SUNAT, el comprobante quedará sin valor legal.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="modal-mini-footer" style="padding: 16px 24px 24px;">
+            <button @click="isVoidModalOpen = false" class="btn-secondary" style="margin-right: 12px; font-weight: 600;">Cancelar</button>
+            <button 
+              @click="submitVoidRequest" 
+              :disabled="voidingDoc || voidReason.length < 10" 
+              class="btn-primary"
+              style="background: #ef4444; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);"
+            >
+              <i v-if="voidingDoc" class="ti ti-loader animate-spin" style="margin-right: 6px;"></i>
+              Confirmar Anulación
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- ================= TAB 3: SERIES & CORRELATIVOS ================= -->
@@ -519,11 +840,10 @@
             </div>
           </transition>
 
-          <!-- All Branches Series Config -->
           <div v-for="branch in allBranches" :key="branch.id" class="branch-series-block">
             <div class="branch-series-header">
               <div class="branch-series-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                <i class="ti ti-building-store"></i>
                 <span>{{ branch.nombre }}</span>
                 <span v-if="branch.is_main" class="main-branch-badge">Principal</span>
               </div>
@@ -534,7 +854,7 @@
                 class="btn-primary btn-primary--sm"
               >
                 <div v-if="savingBranchId === branch.id" class="btn-spinner"></div>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:13px;height:13px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <i v-else class="ti ti-device-floppy"></i>
                 {{ savingBranchId === branch.id ? 'Guardando...' : 'Guardar' }}
               </button>
             </div>
@@ -636,7 +956,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, reactive, watch, computed } from 'vue'
 import { useAuthStore } from '../store/auth'
 import axios from 'axios'
 
@@ -649,7 +969,46 @@ const showClientSecret = ref(false)
 const showCertPass = ref(false)
 const certInput = ref<HTMLInputElement | null>(null)
 
-const activeTab = ref('config') // config, documents, series
+const props = defineProps({
+  initialTab: {
+    type: String,
+    default: 'documents'
+  }
+})
+
+const activeTab = ref(props.initialTab) // config, documents, series
+
+// Void modal state
+const isVoidModalOpen = ref(false)
+const voidReason = ref('')
+const docToVoid = ref<any>(null)
+const voidingDoc = ref(false)
+const batchEmitting = ref(false)
+
+// Edit draft state
+const isEditDraftModalOpen = ref(false)
+const editingDraft = ref(false)
+const draftForm = reactive({
+  id: '',
+  tipo_documento_identidad: 'DNI',
+  numero_documento: '',
+  razon_social: '',
+  direccion: '',
+  serie: '',
+  numero: '',
+  fecha_emision: '',
+  items: [] as any[]
+})
+
+const computedDraftTotal = computed(() => {
+  return draftForm.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0)
+})
+
+const emit = defineEmits(['tabChange'])
+
+watch(activeTab, (newTab) => {
+  emit('tabChange', newTab)
+})
 
 // API Config state
 const config = reactive({
@@ -664,11 +1023,30 @@ const config = reactive({
   certificado_password: '',
   client_id: '',
   client_secret: '',
-  logo_base64: ''
+  logo_base64: '',
+  emision_diferida: false
 })
 
 const saveLogs = ref<string[]>([])
 const apiError = ref<string>('')
+
+async function batchEmitDrafts() {
+  if (!confirm('¿Estás seguro de emitir todos los comprobantes pendientes? Esta acción procesará todos los borradores de la jornada.')) return
+  
+  batchEmitting.value = true
+  try {
+    const res = await axios.post('/billing/documents/batch-emit')
+    if (res.data.success) {
+      alert(res.data.message)
+      await loadDocuments()
+      await loadDocumentStats()
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Error al procesar emisión por lotes')
+  } finally {
+    batchEmitting.value = false
+  }
+}
 
 // Documents state
 const documents = ref<any[]>([])
@@ -681,6 +1059,176 @@ const filterFechaHasta = ref('')
 
 // Document stats
 const docStats = ref<any>({ grand_total: 0, totals: [], data: [] })
+
+// Resend and Message logic
+const resendingId = ref<string | null>(null)
+const syncingId = ref<string | null>(null)
+const showMsgModal = ref(false)
+const selectedDoc = ref<any>(null)
+
+function cleanErrorMessage(error: string) {
+  if (!error) return ""
+  try {
+    const decoded = JSON.parse(error)
+    return decoded.message || decoded.sunat_description || error
+  } catch (e) {
+    return error
+  }
+}
+
+function showSunatMessage(doc: any) {
+  selectedDoc.value = doc
+  showMsgModal.value = true
+}
+
+async function syncDocumentStatus(id: string) {
+  syncingId.value = id
+  try {
+    const res = await axios.get(`/billing/documents/${id}/sync`)
+    if (res.data.success) {
+      // Find and update the document in the list
+      const idx = documents.value.findIndex(d => d.id === id)
+      if (idx !== -1) documents.value[idx] = res.data.data
+    }
+  } catch (err: any) {
+    console.error('Error syncing status', err)
+  } finally {
+    syncingId.value = null
+  }
+}
+
+// Polling for pending docs
+let pollingInterval: any = null
+const startPolling = () => {
+  if (pollingInterval) return
+  pollingInterval = setInterval(() => {
+    const pendingDocs = documents.value.filter(d => d.estado === 'pending' || d.estado === 'error')
+    if (pendingDocs.length > 0) {
+      pendingDocs.forEach(d => syncDocumentStatus(d.id))
+    } else {
+      stopPolling()
+    }
+  }, 5000)
+}
+
+const stopPolling = () => {
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+    pollingInterval = null
+  }
+}
+
+async function resendDocument(id: string) {
+  resendingId.value = id
+  try {
+    const res = await axios.post(`/billing/documents/${id}/resend`)
+    if (res.data.success) {
+      alert('¡Comprobante re-enviado con éxito!')
+      await loadDocuments()
+      await loadDocumentStats()
+    }
+  } catch (err: any) {
+    alert('Error al re-enviar: ' + (err.response?.data?.error || err.message))
+  } finally {
+    resendingId.value = null
+  }
+}
+
+async function deleteDocumentTest(id: string) {
+  if (!confirm('¿Estás seguro de eliminar este registro? Esta acción solo está permitida en MODO PRUEBA para corregir errores de envío.')) return
+  try {
+    const res = await axios.delete(`/billing/documents/${id}`)
+    if (res.data.success) {
+      showMsgModal.value = false
+      await loadDocuments()
+      await loadDocumentStats()
+    }
+  } catch (err: any) {
+    alert('Error: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+function openVoidModal(doc: any) {
+  docToVoid.value = doc
+  voidReason.value = ''
+  isVoidModalOpen.value = true
+}
+
+async function submitVoidRequest() {
+  if (!docToVoid.value) return
+  if (voidReason.value.length < 10) {
+    alert('El motivo debe tener al menos 10 caracteres.')
+    return
+  }
+
+  voidingDoc.value = true
+  try {
+    const res = await axios.post(`/billing/documents/${docToVoid.value.id}/void`, {
+      motivo: voidReason.value
+    })
+    if (res.data.success) {
+      isVoidModalOpen.value = false
+      alert('Solicitud de anulación enviada correctamente. SUNAT procesará la baja en unos momentos.')
+      await loadDocuments()
+      await loadDocumentStats()
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Error al enviar solicitud de anulación')
+  } finally {
+    voidingDoc.value = false
+  }
+}
+
+function openEditDraftModal(doc: any) {
+  if (!doc) return
+  draftForm.id = doc.id
+  draftForm.tipo_documento_identidad = doc.sale?.customer?.tipo_documento || 'DNI'
+  draftForm.numero_documento = doc.sale?.customer?.numero_documento || ''
+  draftForm.razon_social = doc.sale?.customer?.nombre || 'Público General'
+  draftForm.direccion = doc.sale?.customer?.direccion || ''
+  draftForm.serie = doc.serie
+  draftForm.numero = doc.numero
+  draftForm.fecha_emision = doc.created_at ? new Date(doc.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+  
+  // Load items from sale
+  draftForm.items = doc.sale?.items?.map((item: any) => ({
+    id: item.id,
+    nombre: item.product?.nombre || 'Producto',
+    cantidad: item.cantidad,
+    precio_unitario: item.precio_unitario
+  })) || []
+
+  isEditDraftModalOpen.value = true
+}
+
+async function submitDraftUpdate() {
+  editingDraft.value = true
+  try {
+    const res = await axios.patch(`/billing/documents/${draftForm.id}/draft`, {
+      tipo_documento_identidad: draftForm.tipo_documento_identidad,
+      numero_documento: draftForm.numero_documento,
+      razon_social: draftForm.razon_social,
+      direccion: draftForm.direccion,
+      serie: draftForm.serie,
+      numero: draftForm.numero,
+      fecha_emision: draftForm.fecha_emision,
+      items: draftForm.items.map(i => ({
+        id: i.id,
+        cantidad: i.cantidad,
+        precio_unitario: i.precio_unitario
+      }))
+    })
+    if (res.data.success) {
+      isEditDraftModalOpen.value = false
+      alert('Comprobante borrador actualizado correctamente.')
+      await loadDocuments()
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Error al actualizar borrador')
+  } finally {
+    editingDraft.value = false
+  }
+}
 
 // Series/Branch state
 const activeBranch = ref<any>(null)
@@ -699,6 +1247,19 @@ onMounted(async () => {
     loadAllBranches()
   ])
 })
+
+onUnmounted(() => {
+  stopPolling()
+})
+
+watch(documents, (newDocs) => {
+  const hasPending = newDocs.some(d => d.estado === "pending" || d.estado === "error")
+  if (hasPending) {
+    startPolling()
+  } else {
+    stopPolling()
+  }
+}, { deep: true })
 
 const triggerCertInput = () => certInput.value?.click()
 
@@ -855,7 +1416,11 @@ async function downloadFile(uuid: string, type: 'pdf' | 'xml' | 'cdr') {
       alert('El comprobante no tiene este archivo disponible en el microservicio.')
     }
   } catch (err: any) {
-    alert('No se pudo recuperar el archivo: ' + (err.response?.data?.error || 'el comprobante está en modo pruebas y no tiene archivos guardados en el servidor.'))
+    if (err.response?.status === 404 || (err.response?.data?.error && err.response.data.error.includes('404'))) {
+      alert('Error 404: El archivo no existe en el servidor de SUNAT/API.\nSi esto es un registro huérfano de pruebas, puedes usar el botón "Eliminar" para limpiar tu sistema local.')
+    } else {
+      alert('No se pudo recuperar el archivo: ' + (err.response?.data?.error || 'el comprobante está en modo pruebas y no tiene archivos guardados en el servidor.'))
+    }
   }
 }
 
@@ -1293,12 +1858,67 @@ const clearLogs = () => {
 .badge--rejected { background: #fef2f2; color: #ef4444; }
 .badge--pending { background: #fffbeb; color: #d97706; }
 .badge--voided { background: #f8fafc; color: #64748b; }
+.badge--error { background: #fff1f2; color: #e11d48; }
+
+.sync-status-inline-btn {
+  background: none;
+  border: none;
+  color: #6366f1;
+  cursor: pointer;
+  padding: 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.sync-status-inline-btn:hover:not(:disabled) {
+  background: #f5f3ff;
+}
+.sync-status-inline-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* Download Actions Group */
 .action-btn-group {
   display: inline-flex;
   gap: 4px;
 }
+.draft-items-table-wrap {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.draft-items-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.draft-items-table th {
+  text-align: left;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.draft-items-table td { padding: 8px 0; border-bottom: 1px dashed #f1f5f9; }
+.item-name { font-size: 13px; font-weight: 600; color: #334155; }
+.item-input {
+  width: 90%;
+  padding: 6px 8px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.item-total { font-size: 13px; font-weight: 700; color: #475569; }
+
 .action-btn {
   padding: 5px 10px;
   border-radius: 6px;
@@ -1322,6 +1942,20 @@ const clearLogs = () => {
 }
 .action-btn--xml:hover {
   background: #eff6ff;
+}
+.action-btn--resend {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+.action-btn--resend:hover {
+  background: #f5f3ff;
+}
+.action-btn--msg {
+  border-color: #64748b;
+  color: #64748b;
+}
+.action-btn--msg:hover {
+  background: #f8fafc;
 }
 .action-btn--cdr {
   border-color: #cbd5e1;
@@ -1812,4 +2446,37 @@ details[open] .chevron-icon { transform: rotate(180deg); }
 .fade-slide-enter-from { opacity: 0; transform: translateY(-8px); }
 .fade-slide-leave-to   { opacity: 0; transform: translateY(-4px); }
 .hidden-file { display: none; }
+
+/* SUNAT Message Modal */
+.modal-overlay { 
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); 
+  backdrop-filter: blur(4px); z-index: 300; display: flex; 
+  align-items: center; justify-content: center; padding: 20px; 
+}
+.modal-mini { 
+  background: white; padding: 24px; border-radius: 24px; 
+  width: 100%; max-width: 420px; display: flex; 
+  flex-direction: column; gap: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+.modal-mini-header { display: flex; align-items: center; justify-content: space-between; }
+.modal-mini-title { font-size: 16px; font-weight: 800; color: #1e293b; margin: 0; }
+.modal-close-btn { background: none; border: none; font-size: 18px; color: #94a3b8; cursor: pointer; }
+.modal-mini-body { padding: 4px 0; }
+.msg-box { padding: 18px; border-radius: 16px; border: 1px solid; display: flex; flex-direction: column; gap: 12px; }
+.msg-box--accepted { border-color: #bbf7d0; background: #f0fdf4; }
+.msg-box--pending { border-color: #fde68a; background: #fffbeb; }
+.msg-box--rejected { border-color: #fca5a5; background: #fef2f2; }
+.msg-box--warning { border-color: #fde68a; background: #fffbeb; }
+.msg-box-header { display: flex; align-items: center; justify-content: space-between; }
+.msg-text { font-size: 13.5px; color: #334155; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+.msg-text-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; color: #ef4444; background: #fee2e2; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; border: 1px solid #fecaca; }
+.msg-content { display: flex; flex-direction: column; gap: 14px; }
+.msg-list { display: flex; flex-direction: column; gap: 8px; }
+.msg-item { display: flex; gap: 10px; align-items: flex-start; }
+.msg-item-bullet { width: 6px; height: 6px; border-radius: 50%; background: #6366f1; margin-top: 8px; flex-shrink: 0; }
+.msg-box--rejected .msg-item-bullet { background: #ef4444; }
+.msg-box--warning .msg-item-bullet { background: #f59e0b; }
+.badge--warning { background: #fef3c7; color: #92400e; }
+.modal-mini-footer { display: flex; justify-content: flex-end; padding-top: 8px; }
+
 </style>

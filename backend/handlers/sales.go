@@ -157,8 +157,8 @@ func CreateSale(c *gin.Context) {
 	}
 
 	// 1. Calculate Totals, Validate Stocks and Dimensional formulas
-	var total float64
-	computedQuantities := make(map[uuid.UUID]float64)
+	var totalVenta, totalSubtotal, totalIGV float64
+	computedItems := make([]models.SaleItem, 0)
 
 	for _, itemInput := range input.Items {
 		var product models.Product
@@ -177,50 +177,21 @@ func CreateSale(c *gin.Context) {
 
 			switch product.UnidadMedida {
 			case "m":
-				if itemInput.Alto <= 0 {
-					tx.Rollback()
-					c.JSON(http.StatusBadRequest, gin.H{
-						"success": false,
-						"error":   fmt.Sprintf("Producto '%s' (medida lineal) requiere longitud válida (alto > 0)", product.Nombre),
-					})
-					return
-				}
 				cantidadFinal = itemInput.Alto * float64(piezas)
 			case "m2":
-				if itemInput.Alto <= 0 || itemInput.Ancho <= 0 {
-					tx.Rollback()
-					c.JSON(http.StatusBadRequest, gin.H{
-						"success": false,
-						"error":   fmt.Sprintf("Producto '%s' (medida de área) requiere alto y ancho válidos (> 0)", product.Nombre),
-					})
-					return
-				}
 				cantidadFinal = itemInput.Alto * itemInput.Ancho * float64(piezas)
 			case "m3":
-				if itemInput.Alto <= 0 || itemInput.Ancho <= 0 || itemInput.Espesor <= 0 {
-					tx.Rollback()
-					c.JSON(http.StatusBadRequest, gin.H{
-						"success": false,
-						"error":   fmt.Sprintf("Producto '%s' (medida cúbica/volumen) requiere alto, ancho y espesor válidos (> 0)", product.Nombre),
-					})
-					return
-				}
 				cantidadFinal = itemInput.Alto * itemInput.Ancho * itemInput.Espesor * float64(piezas)
 			default:
-				// Fallback to Area
-				if itemInput.Alto <= 0 || itemInput.Ancho <= 0 {
-					tx.Rollback()
-					c.JSON(http.StatusBadRequest, gin.H{
-						"success": false,
-						"error":   fmt.Sprintf("Producto dimensional '%s' requiere dimensiones de alto y ancho válidas (> 0)", product.Nombre),
-					})
-					return
-				}
-				cantidadFinal = itemInput.Alto * itemInput.Ancho * float64(piezas)
+				cantidadFinal = float64(piezas)
 			}
 		}
 
-		computedQuantities[itemInput.ProductID] = cantidadFinal
+		if cantidadFinal <= 0 {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": fmt.Sprintf("Cantidad inválida para %s", product.Nombre)})
+			return
+		}
 
 		// Check Stock
 		var stock models.Stock
@@ -229,20 +200,39 @@ func CreateSale(c *gin.Context) {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"error":   fmt.Sprintf("Stock insuficiente para el producto: %s. Stock disponible: %.2f (Solicitado: %.2f %s)", product.Nombre, stock.StockActual, cantidadFinal, product.UnidadMedida),
+				"error":   fmt.Sprintf("Stock insuficiente para: %s (Disponible: %.2f)", product.Nombre, stock.StockActual),
 			})
 			return
 		}
-		total += (cantidadFinal * itemInput.PrecioUnitario) - itemInput.Descuento
-	}
 
-	var subtotal, igv float64
-	if input.TipoDocumento == "01" || input.TipoDocumento == "03" {
-		subtotal = total / 1.18
-		igv = total - subtotal
-	} else {
-		subtotal = total
-		igv = 0
+		// --- GOLDEN RULES CALCULATIONS ---
+		// 1. Precio Unitario (Ya viene con IGV desde el POS)
+		precioConIGV := itemInput.PrecioUnitario
+		
+		// 2. Total del Ítem (Cantidad * Precio - Descuento)
+		itemTotal := (cantidadFinal * precioConIGV) - itemInput.Descuento
+		
+		// 3. Subtotal e IGV del Ítem (Asumiendo Gravado - Catálogo 07: 10)
+		// TODO: En el futuro permitir otros tipos de afectación desde el frontend
+		itemSubtotal := itemTotal / 1.18
+		itemIGV := itemTotal - itemSubtotal
+
+		// Map to model
+		saleItem := models.SaleItem{
+			ProductID:      itemInput.ProductID,
+			Cantidad:       cantidadFinal,
+			PrecioUnitario: precioConIGV,
+			Subtotal:       itemSubtotal,
+			IGV:            itemIGV,
+			Descuento:      itemInput.Descuento,
+			TipoAfectacion: "10", // Default Gravado
+			UnidadSUNAT:    mapUnidadSUNAT(product.UnidadMedida),
+		}
+
+		computedItems = append(computedItems, saleItem)
+		totalVenta += itemTotal
+		totalSubtotal += itemSubtotal
+		totalIGV += itemIGV
 	}
 
 	// 2. Create Sale Header
@@ -256,14 +246,14 @@ func CreateSale(c *gin.Context) {
 	} else if input.TipoDocumento == "NV" {
 		serie = "NV01"
 	}
-	if serie == "" {
-		if input.TipoDocumento == "01" {
-			serie = "F001"
-		} else if input.TipoDocumento == "NV" {
-			serie = "NV01"
-		} else {
-			serie = "B001"
-		}
+
+	// Validation: Factura (01) requires RUC
+	var customer models.Customer
+	tx.First(&customer, finalCustomerID)
+	if input.TipoDocumento == "01" && customer.TipoDocumento != "RUC" {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "La Factura requiere un cliente con RUC"})
+		return
 	}
 
 	var nextNumber int = 1
@@ -295,9 +285,9 @@ func CreateSale(c *gin.Context) {
 		Serie:         serie,
 		Numero:        fmt.Sprintf("%d", nextNumber),
 		MetodoPago:    input.MetodoPago,
-		Subtotal:      subtotal,
-		IGV:           igv,
-		Total:         total,
+		Subtotal:      totalSubtotal,
+		IGV:           totalIGV,
+		Total:         totalVenta,
 		Estado:        "completed",
 	}
 
@@ -307,105 +297,117 @@ func CreateSale(c *gin.Context) {
 		return
 	}
 
-	// Update Cash Session if it's a cash sale
+	// Update Cash Session
 	if input.MetodoPago == "EFECTIVO" || input.MetodoPago == "" {
-		session.TotalVentasEfe += total
+		session.TotalVentasEfe += totalVenta
 	} else {
-		session.TotalVentasOtr += total
+		session.TotalVentasOtr += totalVenta
 	}
-	if err := tx.Save(&session).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al actualizar totales de caja"})
-		return
-	}
+	tx.Save(&session)
 
 	// 3. Process Items and update inventory
 	var itemsToEmit []models.SaleItem
-	for _, itemInput := range input.Items {
-		cantidadFinal := computedQuantities[itemInput.ProductID]
-
-		// Save Sale Item
-		saleItem := models.SaleItem{
-			SaleID:         sale.ID,
-			ProductID:      itemInput.ProductID,
-			Cantidad:       cantidadFinal,
-			PrecioUnitario: itemInput.PrecioUnitario,
-			Descuento:      itemInput.Descuento,
-		}
-		if err := tx.Create(&saleItem).Error; err != nil {
+	for _, si := range computedItems {
+		si.SaleID = sale.ID
+		if err := tx.Create(&si).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create sale item"})
 			return
 		}
-		itemsToEmit = append(itemsToEmit, saleItem)
+		itemsToEmit = append(itemsToEmit, si)
 
 		// Save dimensional extension if applicable
 		var product models.Product
-		tx.Select("is_dimensional").First(&product, itemInput.ProductID)
+		tx.Select("is_dimensional").First(&product, si.ProductID)
 		if product.IsDimensional {
-			piezas := itemInput.CantidadPiezas
-			if piezas <= 0 {
-				piezas = 1
+			// Find original input to get dimensions
+			var originalInput SaleItemInput
+			for _, inp := range input.Items {
+				if inp.ProductID == si.ProductID {
+					originalInput = inp
+					break
+				}
 			}
+			piezas := originalInput.CantidadPiezas
+			if piezas <= 0 { piezas = 1 }
 			dim := models.SaleItemDimension{
-				SaleItemID:     saleItem.ID,
-				Alto:           itemInput.Alto,
-				Ancho:          itemInput.Ancho,
-				Espesor:        itemInput.Espesor,
+				SaleItemID:     si.ID,
+				Alto:           originalInput.Alto,
+				Ancho:          originalInput.Ancho,
+				Espesor:        originalInput.Espesor,
 				CantidadPiezas: piezas,
 			}
-			if err := tx.Create(&dim).Error; err != nil {
-				tx.Rollback()
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to save dimensional item extensions"})
-				return
-			}
+			tx.Create(&dim)
 		}
 
 		// Deduct Stock
 		var stock models.Stock
-		tx.Where("company_id = ? AND branch_id = ? AND product_id = ?", companyID, branchID, itemInput.ProductID).First(&stock)
+		tx.Where("company_id = ? AND branch_id = ? AND product_id = ?", companyID, branchID, si.ProductID).First(&stock)
 		stockAnterior := stock.StockActual
-		stock.StockActual -= cantidadFinal
-
-		if err := tx.Save(&stock).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to deduct stock"})
-			return
-		}
+		stock.StockActual -= si.Cantidad
+		tx.Save(&stock)
 
 		// Register in Kardex
-		kardex := models.Kardex{
+		tx.Create(&models.Kardex{
 			CompanyID:      companyID,
 			BranchID:       branchID,
-			ProductID:      itemInput.ProductID,
+			ProductID:      si.ProductID,
 			TipoMovimiento: "VENTA",
 			Referencia:     "VENTA-" + sale.ID.String()[:8],
-			Cantidad:       cantidadFinal,
+			Cantidad:       si.Cantidad,
 			StockAnterior:  stockAnterior,
 			StockNuevo:     stock.StockActual,
-		}
-		if err := tx.Create(&kardex).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create kardex entry"})
-			return
-		}
+		})
 	}
 
 	tx.Commit()
 
-	// 4. Trigger Electronic Billing (Asynchronous)
+	// 4. Trigger Electronic Billing Integration
 	go func() {
-		billingService := services.NewBillingService()
-		_, err := billingService.EmitSale(sale, itemsToEmit)
-		if err != nil {
-			fmt.Printf("Error emitting electronic document: %v\n", err)
+		if sale.TipoDocumento == "01" || sale.TipoDocumento == "03" {
+			var billingConfig models.BillingConfig
+			config.DB.Where("company_id = ?", companyID).First(&billingConfig)
+
+			if billingConfig.Estado == "active" {
+				if billingConfig.EmisionDiferida {
+					// MODO DIFERIDO: Solo guardar el registro en borrador
+					doc := models.ElectronicDocument{
+						CompanyID:     companyID,
+						SaleID:        &sale.ID,
+						TipoDocumento: sale.TipoDocumento,
+						Serie:         sale.Serie,
+						Numero:        sale.Numero,
+						Estado:        "draft",
+						Observaciones: "Emisión diferida: Pendiente de revisión al cierre de jornada",
+					}
+					config.DB.Create(&doc)
+				} else {
+					// MODO INSTANTÁNEO: Enviar a la API de inmediato (comportamiento actual)
+					billingService := services.NewBillingService()
+					billingService.EmitSale(sale, itemsToEmit)
+				}
+			}
 		}
 	}()
 
-	// Log audit action asynchronously
-	go logAudit(userID, "Ventas", "Crear Venta", fmt.Sprintf("Venta registrada por S/. %.2f", total), c.ClientIP())
+	go logAudit(userID, "Ventas", "Crear Venta", fmt.Sprintf("Venta %s-%s registrada", sale.Serie, sale.Numero), c.ClientIP())
 
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": sale})
+}
+
+func mapUnidadSUNAT(unidad string) string {
+	switch unidad {
+	case "und", "un.":
+		return "NIU"
+	case "m", "m2", "m3":
+		return "NIU" // O MTR/MTK/MTQ segun sea estricto, pero NIU es universal para bienes
+	case "kg":
+		return "KGM"
+	case "servicio":
+		return "ZZ"
+	default:
+		return "NIU"
+	}
 }
 
 type CreateCreditNoteInput struct {
