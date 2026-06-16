@@ -698,6 +698,11 @@ func (s *BillingService) SyncCompanyInfo(company models.Company) error {
 		"distrito":         clean(company.Distrito),
 		"modo":             apiMode,
 	}
+
+	if billingConfig.CorrelativoPadding != nil {
+		payload["correlativo_padding"] = *billingConfig.CorrelativoPadding
+	}
+
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return err

@@ -254,6 +254,20 @@
               <p class="field-hint">Identificador único en FacturaAPI. Se autogenera si está vacío y existe una API Key global.</p>
             </div>
             <div class="field">
+              <label class="field-label">Ceros en Correlativo</label>
+              <input
+                v-model.number="config.correlativo_padding"
+                type="number"
+                min="0"
+                max="10"
+                placeholder="Ej. 8"
+                class="field-input field-input--mono"
+              />
+              <p class="field-hint">Dígitos para el comprobante (Ej: "8" → F001-00000001, "0" → F001-1).</p>
+            </div>
+          </div>
+          <div class="form-grid form-grid--1" style="margin-top: 14px;">
+            <div class="field">
               <label class="field-label">Modo de Operación</label>
               <div class="mode-toggle">
                 <button
@@ -488,7 +502,7 @@
                 </td>
                 <td>
                   <span 
-                    :class="['badge', 'badge--' + (doc.observaciones && doc.estado === 'accepted' ? 'warning' : doc.estado)]"
+                    :class="['badge', 'badge--' + (doc.observaciones && doc.estado === 'accepted' ? 'warning' : (doc.estado || 'pending'))]"
                     @click="showSunatMessage(doc)"
                     style="cursor: pointer;"
                     title="Click para ver detalle de SUNAT"
@@ -596,9 +610,9 @@
               <button @click="showMsgModal = false" class="modal-close-btn">✕</button>
             </div>
             <div class="modal-mini-body">
-              <div v-if="selectedDoc" class="msg-box" :class="'msg-box--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
+              <div v-if="selectedDoc" class="msg-box" :class="'msg-box--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : (selectedDoc.estado || 'pending'))">
                 <div class="msg-box-header">
-                  <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
+                  <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : (selectedDoc.estado || 'pending')))">
                     {{ formatEstado(selectedDoc) }}
                   </span>
                   <span class="font-mono text-[11px]">{{ selectedDoc.serie }}-{{ selectedDoc.numero }}</span>
@@ -1024,7 +1038,8 @@ const config = reactive({
   client_id: '',
   client_secret: '',
   logo_base64: '',
-  emision_diferida: false
+  emision_diferida: false,
+  correlativo_padding: 8
 })
 
 const saveLogs = ref<string[]>([])
@@ -1425,17 +1440,20 @@ async function downloadFile(uuid: string, type: 'pdf' | 'xml' | 'cdr') {
 }
 
 function formatEstado(doc: any): string {
-  if (!doc) return ''
+  if (!doc) return 'SIN DATOS'
   if (doc.observaciones && doc.estado === 'accepted') return 'OBSERVADO'
   
-  switch (doc.estado) {
+  const estado = (doc.estado || 'pending').toLowerCase()
+  
+  switch (estado) {
     case 'accepted': return 'ACEPTADO'
     case 'rejected': return 'RECHAZADO'
     case 'pending': return 'PENDIENTE'
     case 'voided': return 'ANULADO'
+    case 'void_pending': return 'ANULACIÓN EN CURSO'
     case 'error': return 'ERROR'
     case 'draft': return 'BORRADOR'
-    default: return (doc.estado || '').toUpperCase()
+    default: return estado.toUpperCase()
   }
 }
 
@@ -1869,11 +1887,14 @@ const clearLogs = () => {
   border-radius: 50%;
   background: currentColor;
 }
-.badge--accepted { background: #f0fdf4; color: #16a34a; }
-.badge--rejected { background: #fef2f2; color: #ef4444; }
-.badge--pending { background: #fffbeb; color: #d97706; }
-.badge--voided { background: #f8fafc; color: #64748b; }
-.badge--error { background: #fff1f2; color: #e11d48; }
+.badge--accepted { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+.badge--rejected { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.badge--pending { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.badge--voided { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.badge--void_pending { background: #fef9c3; color: #854d0e; border: 1px solid #fef08a; }
+.badge--error { background: #fff1f2; color: #9f1239; border: 1px solid #ffe4e6; }
+.badge--draft { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+.badge--warning { background: #ffedd5; color: #9a3412; border: 1px solid #fed7aa; }
 
 .sync-status-inline-btn {
   background: none;
@@ -2491,7 +2512,6 @@ details[open] .chevron-icon { transform: rotate(180deg); }
 .msg-item-bullet { width: 6px; height: 6px; border-radius: 50%; background: #6366f1; margin-top: 8px; flex-shrink: 0; }
 .msg-box--rejected .msg-item-bullet { background: #ef4444; }
 .msg-box--warning .msg-item-bullet { background: #f59e0b; }
-.badge--warning { background: #fef3c7; color: #92400e; }
 .modal-mini-footer { display: flex; justify-content: flex-end; padding-top: 8px; }
 
 </style>

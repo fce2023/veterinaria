@@ -73,6 +73,7 @@ func SaveBillingConfig(c *gin.Context) {
 		ClientID            string `json:"client_id"`
 		ClientSecret        string `json:"client_secret"`
 		EmisionDiferida     bool   `json:"emision_diferida"`
+		CorrelativoPadding  *int   `json:"correlativo_padding"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -94,6 +95,7 @@ func SaveBillingConfig(c *gin.Context) {
 	billingConfig.ClientID = input.ClientID
 	billingConfig.ClientSecret = input.ClientSecret
 	billingConfig.EmisionDiferida = input.EmisionDiferida
+	billingConfig.CorrelativoPadding = input.CorrelativoPadding
 	if input.CertificadoBase64 != "" {
 		billingConfig.CertificadoBase64 = input.CertificadoBase64
 	}

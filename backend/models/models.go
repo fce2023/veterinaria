@@ -276,6 +276,7 @@ type BillingConfig struct {
 	ClientSecret      string    `gorm:"type:varchar(255)" json:"client_secret"`
 	LogoBase64        string    `gorm:"type:text" json:"logo_base64"`
 	EmisionDiferida   bool      `gorm:"type:boolean;default:false" json:"emision_diferida"`
+	CorrelativoPadding *int     `gorm:"type:integer" json:"correlativo_padding"`
 }
 
 // ElectronicDocument billing record
