@@ -12,6 +12,7 @@ import (
 	"veterinaria/backend/config"
 	"veterinaria/backend/handlers"
 	"veterinaria/backend/models"
+	"veterinaria/backend/services"
 )
 
 func main() {
@@ -64,7 +65,10 @@ func main() {
 	// 3. Seed Database with Initial Data
 	seedDatabase()
 
-	// 4. Setup Gin Router
+	// 4. Start Background Workers
+	services.StartBillingSyncWorker()
+
+	// 5. Setup Gin Router
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -212,6 +216,7 @@ func main() {
 			protected.DELETE("/billing/documents/:id", auth.CompanyAdminMiddleware(), handlers.DeleteElectronicDocumentTest)
 			protected.GET("/billing/series", handlers.GetBillingSeries)
 			protected.PATCH("/billing/series/:branchId", auth.CompanyAdminMiddleware(), handlers.UpdateBillingSeries)
+			protected.POST("/billing/series/:id/reset", auth.CompanyAdminMiddleware(), handlers.ResetBillingSeries)
 
 			// SaaS Billing & Subscriptions for client tenants
 			protected.POST("/billing/payments", handlers.CreatePaymentRequest)

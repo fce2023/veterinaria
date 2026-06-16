@@ -242,7 +242,7 @@
 
           <!-- API Settings -->
           <div class="form-section-label" style="margin-top:20px;">Configuración API & Entorno</div>
-          <div class="form-grid form-grid--2">
+          <div class="form-grid form-grid--1">
             <div class="field">
               <label class="field-label">Tenant UUID (FacturaAPI)</label>
               <input
@@ -252,18 +252,6 @@
                 class="field-input field-input--mono"
               />
               <p class="field-hint">Identificador único en FacturaAPI. Se autogenera si está vacío y existe una API Key global.</p>
-            </div>
-            <div class="field">
-              <label class="field-label">Ceros en Correlativo</label>
-              <input
-                v-model.number="config.correlativo_padding"
-                type="number"
-                min="0"
-                max="10"
-                placeholder="Ej. 8"
-                class="field-input field-input--mono"
-              />
-              <p class="field-hint">Dígitos para el comprobante (Ej: "8" → F001-00000001, "0" → F001-1).</p>
             </div>
           </div>
           <div class="form-grid form-grid--1" style="margin-top: 14px;">
@@ -486,7 +474,7 @@
                 <td>
                   <div class="doc-ident-wrap">
                     <span class="doc-type-pill">{{ formatDocType(doc.tipo_documento) }}</span>
-                    <strong class="font-mono text-slate-800">{{ doc.serie }}-{{ doc.numero }}</strong>
+                    <strong class="font-mono text-slate-800">{{ doc.serie }}-{{ formatCorrelativo(doc.numero, doc.sale?.branch_id) }}</strong>
                   </div>
                 </td>
                 <td>
@@ -612,10 +600,10 @@
             <div class="modal-mini-body">
               <div v-if="selectedDoc" class="msg-box" :class="'msg-box--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : (selectedDoc.estado || 'pending'))">
                 <div class="msg-box-header">
-                  <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : (selectedDoc.estado || 'pending')))">
+                  <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : (selectedDoc.estado || 'pending'))">
                     {{ formatEstado(selectedDoc) }}
                   </span>
-                  <span class="font-mono text-[11px]">{{ selectedDoc.serie }}-{{ selectedDoc.numero }}</span>
+                  <span class="font-mono text-[11px]">{{ selectedDoc.serie }}-{{ formatCorrelativo(selectedDoc.numero, selectedDoc.sale?.branch_id) }}</span>
                 </div>
                 
                 <!-- Main Message Content -->
@@ -892,13 +880,23 @@
                     <p class="field-hint">4 chars — F001 (prod) / FL01 (beta)</p>
                   </div>
                   <div class="field" style="margin-top:12px;">
-                    <label class="field-label">Siguiente Correlativo</label>
-                    <input 
-                      v-model.number="branch.correlativo_factura" 
-                      type="number" 
-                      placeholder="Ej. 1" 
-                      min="1" 
-                      class="field-input field-input--mono" 
+                    <div class="field-label-row">
+                      <label class="field-label">Siguiente Correlativo</label>
+                      <button 
+                        type="button" 
+                        class="reset-inline-btn"
+                        @click="resetCorrelativo(branch.id, 'factura')"
+                        title="Reiniciar a 1"
+                      >
+                        Reiniciar
+                      </button>
+                    </div>
+                    <input
+                      v-model.number="branch.correlativo_factura"
+                      type="number"
+                      placeholder="Ej. 1"
+                      min="1"
+                      class="field-input field-input--mono"
                     />
                     <p class="field-hint">Autoincrementa con cada venta</p>
                   </div>
@@ -913,25 +911,49 @@
                 <div class="series-card-body">
                   <div class="field">
                     <label class="field-label">Serie de Boleta</label>
-                    <input 
-                      v-model="branch.serie_boleta" 
-                      type="text" 
-                      placeholder="Ej. B001" 
-                      maxlength="4" 
-                      class="field-input field-input--mono" 
+                    <input
+                      v-model="branch.serie_boleta"
+                      type="text"
+                      placeholder="Ej. B001"
+                      maxlength="4"
+                      class="field-input field-input--mono"
                     />
                     <p class="field-hint">4 chars — B001 (prod) / BL01 (beta)</p>
                   </div>
                   <div class="field" style="margin-top:12px;">
-                    <label class="field-label">Siguiente Correlativo</label>
-                    <input 
-                      v-model.number="branch.correlativo_boleta" 
-                      type="number" 
-                      placeholder="Ej. 1" 
-                      min="1" 
-                      class="field-input field-input--mono" 
+                    <div class="field-label-row">
+                      <label class="field-label">Siguiente Correlativo</label>
+                      <button 
+                        type="button" 
+                        class="reset-inline-btn"
+                        @click="resetCorrelativo(branch.id, 'boleta')"
+                        title="Reiniciar a 1"
+                      >
+                        Reiniciar
+                      </button>
+                    </div>
+                    <input
+                      v-model.number="branch.correlativo_boleta"
+                      type="number"
+                      placeholder="Ej. 1"
+                      min="1"
+                      class="field-input field-input--mono"
                     />
                     <p class="field-hint">Autoincrementa con cada venta</p>
+                  </div>
+
+                  <!-- Configurable Padding -->
+                  <div class="field field--padding" style="margin-top:12px; padding-top:12px; border-top: 1px dashed #e2e8f0;">
+                    <label class="field-label">Ceros en Correlativo</label>
+                    <input 
+                      v-model.number="branch.correlativo_padding"
+                      type="number" 
+                      min="0" 
+                      max="10" 
+                      placeholder="Ej. 8" 
+                      class="field-input field-input--mono"
+                    >
+                    <p class="field-hint">Dígitos totales (Ej: "8" → 00000001, "0" → 1).</p>
                   </div>
                 </div>
               </div>
@@ -1117,7 +1139,7 @@ let pollingInterval: any = null
 const startPolling = () => {
   if (pollingInterval) return
   pollingInterval = setInterval(() => {
-    const pendingDocs = documents.value.filter(d => d.estado === 'pending' || d.estado === 'error')
+    const pendingDocs = documents.value.filter(d => d.estado === 'pending' || d.estado === 'error' || d.estado === 'void_pending')
     if (pendingDocs.length > 0) {
       pendingDocs.forEach(d => syncDocumentStatus(d.id))
     } else {
@@ -1268,7 +1290,7 @@ onUnmounted(() => {
 })
 
 watch(documents, (newDocs) => {
-  const hasPending = newDocs.some(d => d.estado === "pending" || d.estado === "error")
+  const hasPending = newDocs.some(d => d.estado === "pending" || d.estado === "error" || d.estado === "void_pending")
   if (hasPending) {
     startPolling()
   } else {
@@ -1304,6 +1326,8 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
+  if (!confirm('¿Estás seguro de guardar los cambios? Los datos se sincronizarán con FacturaAPI (Registro de empresa, Certificado Digital y Credenciales SOL).')) return
+  
   saving.value = true
   saveLogs.value = []
   apiError.value = ''
@@ -1389,6 +1413,8 @@ async function loadAllBranches() {
 
 // Save single branch series via dedicated endpoint
 async function saveSingleBranch(branch: any) {
+  if (!confirm(`¿Sincronizar cambios de "${branch.nombre}" con FacturacionApi? Se actualizarán series y ceros en el servidor.`)) return
+
   savingBranchId.value = branch.id
   branchSuccessMsg.value = ''
   branchErrorMsg.value = ''
@@ -1398,6 +1424,7 @@ async function saveSingleBranch(branch: any) {
       serie_boleta: branch.serie_boleta,
       correlativo_factura: branch.correlativo_factura,
       correlativo_boleta: branch.correlativo_boleta,
+      correlativo_padding: branch.correlativo_padding,
     })
     if (res.data.success) {
       branchSuccessMsg.value = `Series de "${branch.nombre}" guardadas correctamente.`
@@ -1408,6 +1435,26 @@ async function saveSingleBranch(branch: any) {
     }
   } catch (err: any) {
     branchErrorMsg.value = err.response?.data?.error || 'Error al guardar series.'
+  } finally {
+    savingBranchId.value = null
+  }
+}
+
+async function resetCorrelativo(branchId: string, type: 'factura' | 'boleta') {
+  if (!confirm(`¿Estás seguro de reiniciar el contador de ${type}s? Esta acción volverá el correlativo a 1.`)) return
+  
+  savingBranchId.value = branchId
+  branchErrorMsg.value = ''
+  try {
+    const res = await axios.post(`/billing/series/${branchId}/reset`, { type })
+    if (res.data.success) {
+      alert(res.data.message)
+      // Update local data
+      const idx = allBranches.value.findIndex((b: any) => b.id === branchId)
+      if (idx !== -1) allBranches.value[idx] = res.data.data
+    }
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Error al reiniciar el contador')
   } finally {
     savingBranchId.value = null
   }
@@ -1451,6 +1498,7 @@ function formatEstado(doc: any): string {
     case 'pending': return 'PENDIENTE'
     case 'voided': return 'ANULADO'
     case 'void_pending': return 'ANULACIÓN EN CURSO'
+    case 'void_accepted': return 'ANULADO (BAJA)'
     case 'error': return 'ERROR'
     case 'draft': return 'BORRADOR'
     default: return estado.toUpperCase()
@@ -1465,6 +1513,25 @@ function formatDocType(type: string): string {
     case '08': return 'Nota Débito'
     default: return 'Doc'
   }
+}
+
+function formatCorrelativo(num: any, docBranchId?: string): string {
+  if (num === undefined || num === null) return ''
+  const s = String(num)
+  
+  // Find padding from branch config
+  let padding = 8
+  const targetBranchId = docBranchId || authStore.user?.branch_id
+  
+  if (targetBranchId && allBranches.value.length > 0) {
+    const branch = allBranches.value.find((b: any) => b.id === targetBranchId)
+    if (branch && branch.correlativo_padding !== undefined) {
+      padding = branch.correlativo_padding
+    }
+  }
+
+  if (s.length >= padding) return s
+  return s.padStart(padding, '0')
 }
 
 function formatDate(dateStr: string): string {
@@ -1891,6 +1958,7 @@ const clearLogs = () => {
 .badge--rejected { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 .badge--pending { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
 .badge--voided { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.badge--void_accepted { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; text-decoration: line-through; }
 .badge--void_pending { background: #fef9c3; color: #854d0e; border: 1px solid #fef08a; }
 .badge--error { background: #fff1f2; color: #9f1239; border: 1px solid #ffe4e6; }
 .badge--draft { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
@@ -2137,6 +2205,31 @@ const clearLogs = () => {
 }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-label { font-size: 11.5px; font-weight: 700; color: #374151; }
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.field-label-row .field-label {
+  margin-bottom: 0;
+}
+.reset-inline-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.reset-inline-btn:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
 .required { color: #ef4444; }
 .field-input {
   width: 100%;
@@ -2503,6 +2596,10 @@ details[open] .chevron-icon { transform: rotate(180deg); }
 .msg-box--pending { border-color: #fde68a; background: #fffbeb; }
 .msg-box--rejected { border-color: #fca5a5; background: #fef2f2; }
 .msg-box--warning { border-color: #fde68a; background: #fffbeb; }
+.msg-box--error { border-color: #fecaca; background: #fff1f2; }
+.msg-box--voided { border-color: #e2e8f0; background: #f8fafc; }
+.msg-box--void_pending { border-color: #fef08a; background: #fef9c3; }
+.msg-box--draft { border-color: #e5e7eb; background: #f3f4f6; }
 .msg-box-header { display: flex; align-items: center; justify-content: space-between; }
 .msg-text { font-size: 13.5px; color: #334155; line-height: 1.6; margin: 0; white-space: pre-wrap; }
 .msg-text-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; color: #ef4444; background: #fee2e2; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; border: 1px solid #fecaca; }
