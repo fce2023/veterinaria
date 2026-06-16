@@ -291,6 +291,10 @@ func UpdateMyCompany(c *gin.Context) {
 		Telefono        string `json:"telefono"`
 		Email           string `json:"email"`
 		LogoBase64      string `json:"logo_base64"`
+		Ubigeo          string `json:"ubigeo"`
+		Departamento    string `json:"departamento"`
+		Provincia       string `json:"provincia"`
+		Distrito        string `json:"distrito"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -309,6 +313,11 @@ func UpdateMyCompany(c *gin.Context) {
 	company.Direccion = input.Direccion
 	company.Telefono = input.Telefono
 	company.Email = input.Email
+	company.Ubigeo = input.Ubigeo
+	company.Departamento = input.Departamento
+	company.Provincia = input.Provincia
+	company.Distrito = input.Distrito
+
 	if input.LogoBase64 != "" {
 		// Basic optimization check: 200KB base64 limit (~150KB raw)
 		// 400x400 logos should be well under this.
@@ -324,11 +333,14 @@ func UpdateMyCompany(c *gin.Context) {
 		return
 	}
 
-	// Try to sync logo with FacturaAPI if billing is active
+	// Try to sync with FacturaAPI if billing is active
+	billingService := services.NewBillingService()
 	if input.LogoBase64 != "" {
-		billingService := services.NewBillingService()
 		_ = billingService.SyncLogo(company.ID, company.LogoBase64) // Fail silently here as it's secondary
 	}
+	
+	// Sync entire company profile ( fiscal address, etc )
+	_ = billingService.SyncCompanyInfo(company)
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Datos de negocio actualizados correctamente", "data": company})
 }
@@ -594,13 +606,60 @@ func QueryRUC(c *gin.Context) {
 		return
 	}
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(body, &rawData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al parsear datos recibidos"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+	// Resolve company name (razon social)
+	var razonSocial string
+	if val, ok := rawData["razon_social"].(string); ok && val != "" {
+		razonSocial = val
+	} else if val, ok := rawData["nombre_o_razon_social"].(string); ok && val != "" {
+		razonSocial = val
+	} else if val, ok := rawData["nombre"].(string); ok && val != "" {
+		razonSocial = val
+	}
+
+	// Resolve address
+	var direccion string
+	if val, ok := rawData["direccion"].(string); ok && val != "" {
+		direccion = val
+	} else if val, ok := rawData["direccion_completa"].(string); ok && val != "" {
+		direccion = val
+	}
+
+	// Clean address if empty provider marker
+	if direccion == "-" {
+		direccion = ""
+	}
+
+	// Resolve ubigeo
+	var ubigeo interface{} = rawData["ubigeo"]
+	if rawData["ubigeo_sunat"] != nil {
+		ubigeo = rawData["ubigeo_sunat"]
+	}
+
+	// Perfect normalization for all RUC modes
+	normalized := gin.H{
+		"nombre":                razonSocial,
+		"razon_social":          razonSocial,
+		"nombre_o_razon_social": razonSocial,
+		"nombre_comercial":      rawData["nombre_comercial"],
+		"direccion":             direccion,
+		"direccion_completa":    direccion,
+		"estado":                rawData["estado"],
+		"condicion":             rawData["condicion"],
+		"ubigeo":                ubigeo,
+		"ubigeo_sunat":          rawData["ubigeo_sunat"],
+		"departamento":          rawData["departamento"],
+		"provincia":             rawData["provincia"],
+		"distrito":              rawData["distrito"],
+		"locales_anexos":        rawData["locales_anexos"],
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": normalized})
 }
 
 // QueryDNI proxies requests to apiconsulta.sehuacho.com to get DNI details securely
@@ -643,13 +702,19 @@ func QueryDNI(c *gin.Context) {
 		return
 	}
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(body, &rawData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al parsear datos recibidos"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+	// Normalization for DNI (matching provided format)
+	normalized := gin.H{
+		"nombre":    rawData["full_name"],
+		"full_name": rawData["full_name"],
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": normalized})
 }
 
 

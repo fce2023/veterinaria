@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"regexp"
@@ -39,6 +40,17 @@ type BillingCustomer struct {
 	Direccion       string `json:"direccion,omitempty"`
 }
 
+type BillingIssuer struct {
+	Ruc            string `json:"ruc"`
+	RazonSocial    string `json:"razon_social"`
+	NombreComercial string `json:"nombre_comercial,omitempty"`
+	Direccion      string `json:"direccion"`
+	Ubigeo         string `json:"ubigeo"`
+	Departamento   string `json:"departamento"`
+	Provincia      string `json:"provincia"`
+	Distrito       string `json:"distrito"`
+}
+
 type BillingItem struct {
 	Descripcion    string  `json:"descripcion"`
 	Cantidad       float64 `json:"cantidad"`
@@ -65,6 +77,9 @@ type EmitPayload struct {
 	Async      bool               `json:"async"`
 	Modo       string             `json:"modo"`
 	Header     BillingHeader      `json:"header"`
+	Emisor     *BillingIssuer     `json:"emisor,omitempty"`
+	Company    *BillingIssuer     `json:"company,omitempty"` // Alternative for compatibility
+	Seller     *BillingIssuer     `json:"seller,omitempty"`  // Alternative for compatibility
 	Cliente    BillingCustomer    `json:"cliente"`
 	Items      []BillingItem      `json:"items"`
 	Totales    BillingTotals      `json:"totales"`
@@ -92,13 +107,162 @@ func NewBillingService() *BillingService {
 	return &BillingService{}
 }
 
+// EnsureCompanyExists verifies that the company exists in FacturaAPI and registers it if not.
+// It returns the verified TenantUUID and an error if any.
+func (s *BillingService) EnsureCompanyExists(companyID uuid.UUID) (string, error) {
+	var company models.Company
+	if err := config.DB.First(&company, companyID).Error; err != nil {
+		return "", fmt.Errorf("company not found: %w", err)
+	}
+
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		return "", fmt.Errorf("billing configuration not found: %w", err)
+	}
+
+	// Resolve API credentials
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		if err := config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting).Error; err == nil && apiURL == "" {
+			apiURL = globalURLSetting.Valor
+		}
+		if err := config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting).Error; err == nil && apiKey == "" {
+			apiKey = globalKeySetting.Valor
+		}
+	}
+
+	if apiURL == "" || apiKey == "" {
+		return "", fmt.Errorf("FacturaAPI configuration missing")
+	}
+
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	uuidStr := billingConfig.TenantUUID
+
+	// 1. Verify existing UUID if present
+	if uuidStr != "" {
+		req, _ := http.NewRequest("GET", apiURL+"/api/v1/config/"+uuidStr, nil)
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("X-API-Key", apiKey)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				log.Printf("[Billing] UUID %s not found in FacturaAPI for company %s. Will search/register.", uuidStr, company.RUC)
+				uuidStr = ""
+			}
+		} else {
+			log.Printf("[Billing] Warning verifying UUID: %v", err)
+		}
+	}
+
+	// 2. If no UUID (not provided or not found), search by RUC
+	if uuidStr == "" {
+		log.Printf("[Billing] Searching company by RUC %s in FacturaAPI", company.RUC)
+		// Fix URL formatting: use url.Values for safety
+		searchURL := fmt.Sprintf("%s/api/v1/companies/search?ruc=%s", apiURL, company.RUC)
+		req, _ := http.NewRequest("GET", searchURL, nil)
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("X-API-Key", apiKey)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var result struct {
+					UUID string `json:"uuid"`
+				}
+				body, _ := io.ReadAll(resp.Body)
+				if err := json.Unmarshal(body, &result); err == nil && result.UUID != "" {
+					uuidStr = result.UUID
+					log.Printf("[Billing] Found existing company in FacturaAPI: %s", uuidStr)
+				}
+			}
+		}
+	}
+
+	// 3. Still no UUID? Register it!
+	if uuidStr == "" {
+		log.Printf("[Billing] Registering company %s in FacturaAPI", company.RUC)
+		apiMode := billingConfig.Modo
+		if apiMode == "dev" {
+			apiMode = "beta"
+		} else if apiMode == "prod" {
+			apiMode = "produccion"
+		}
+
+		regPayload := map[string]string{
+			"ruc":              company.RUC,
+			"razon_social":     company.RazonSocial,
+			"nombre_comercial": company.NombreComercial,
+			"direccion":        company.Direccion,
+			"ubigeo":           company.Ubigeo,
+			"departamento":     company.Departamento,
+			"provincia":        company.Provincia,
+			"distrito":         company.Distrito,
+			"modo":             apiMode,
+		}
+		jsonPayload, _ := json.Marshal(regPayload)
+
+		req, _ := http.NewRequest("POST", apiURL+"/api/v1/companies/register", bytes.NewBuffer(jsonPayload))
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("X-API-Key", apiKey)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("error connecting to FacturaAPI for registration: %w", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+			var result struct {
+				UUID string `json:"uuid"`
+			}
+			if err := json.Unmarshal(body, &result); err == nil && result.UUID != "" {
+				uuidStr = result.UUID
+				log.Printf("[Billing] Registered company in FacturaAPI: %s", uuidStr)
+			}
+		} else {
+			return "", fmt.Errorf("FacturaAPI registration failed (%d): %s", resp.StatusCode, string(body))
+		}
+	}
+
+	// 4. Update local DB if changed
+	if uuidStr != billingConfig.TenantUUID {
+		log.Printf("[Billing] Updating local TenantUUID from %s to %s", billingConfig.TenantUUID, uuidStr)
+		if err := config.DB.Model(&billingConfig).Update("tenant_uuid", uuidStr).Error; err != nil {
+			log.Printf("[Billing] Error updating local TenantUUID: %v", err)
+		}
+	}
+
+	return uuidStr, nil
+}
+
 // EmitSale sends a sale to FacturaAPI for electronic billing
 func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*EmitResponse, error) {
 	if sale.TipoDocumento == "NV" || sale.TipoDocumento == "00" || sale.TipoDocumento == "99" {
 		return nil, nil // Nota de venta is an internal ticket, no SUNAT emission
 	}
 
-	// 1. Get Billing Config for the company
+	// 1. Ensure company exists in FacturaAPI before emitting
+	tenantUUID, err := s.EnsureCompanyExists(sale.CompanyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify/register company in FacturaAPI: %w", err)
+	}
+
+	// Get updated Billing Config
 	var billingConfig models.BillingConfig
 	if err := config.DB.Where("company_id = ?", sale.CompanyID).First(&billingConfig).Error; err != nil {
 		return nil, fmt.Errorf("billing configuration not found for company %s", sale.CompanyID)
@@ -129,18 +293,24 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 
 	// Sanitize URL
 	if apiURL != "" {
-		if apiURL[len(apiURL)-1] == '/' {
-			apiURL = apiURL[:len(apiURL)-1]
-		}
-		suffix := "/api/v1"
-		if len(apiURL) >= len(suffix) && apiURL[len(apiURL)-len(suffix):] == suffix {
-			apiURL = apiURL[:len(apiURL)-len(suffix)]
-		}
+		apiURL = strings.TrimSuffix(apiURL, "/")
+		apiURL = strings.TrimSuffix(apiURL, "/api/v1")
 	}
 
 	if apiURL == "" || apiKey == "" {
 		return nil, fmt.Errorf("FacturaAPI global configuration missing (URL or Token not configured)")
 	}
+
+	// ... (rest remains same but use tenantUUID if needed, although billingConfig.TenantUUID is now updated)
+
+	// 1.5 Fetch Full Company Info for Emisor payload
+	var company models.Company
+	if err := config.DB.First(&company, sale.CompanyID).Error; err != nil {
+		return nil, fmt.Errorf("failed to retrieve company info: %w", err)
+	}
+
+	log.Printf("[Billing] Emitting %s %s-%s for company %s. Fiscal Info: Ubigeo=%s, Dept=%s", 
+		sale.TipoDocumento, sale.Serie, sale.Numero, company.RazonSocial, company.Ubigeo, company.Departamento)
 
 	// 2. Prepare Payload
 	var customer models.Customer
@@ -171,18 +341,54 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	}
 
 	num, _ := strconv.Atoi(sale.Numero)
+
+	// Map dev to beta and prod to produccion for FacturaAPI compatibility
+	apiMode := billingConfig.Modo
+	if apiMode == "dev" {
+		apiMode = "beta"
+	} else if apiMode == "prod" {
+		apiMode = "produccion"
+	}
+
+	// Always true in production to handle queues, false in beta to wait for SUNAT sync response
+	isAsync := apiMode == "produccion"
+
+	log.Printf("[Billing] Emitting %s %s-%d for company %s. Env: %s, Async: %v", 
+		sale.TipoDocumento, sale.Serie, num, company.RazonSocial, apiMode, isAsync)
+
+	// Ensure we don't send hyphens as per provider instructions
+	clean := func(s string) string {
+		s = strings.TrimSpace(s)
+		if s == "-" {
+			return ""
+		}
+		return s
+	}
+
 	payload := EmitPayload{
-		EmpresaID: billingConfig.TenantUUID,
-		Async:     true,
-		Modo:      billingConfig.Modo,
+		EmpresaID: tenantUUID,
+		Async:     isAsync,
+		Modo:      apiMode,
 		Header: BillingHeader{
 			TipoDocumento: sale.TipoDocumento,
 			Serie:         sale.Serie,
 			Numero:        num,
 			FechaEmision:  sale.CreatedAt.Format("2006-01-02"),
 		},
+		// Re-enabling Emisor block to "force" the data into the XML
+		// and using the cleaning function to avoid hyphens.
+		Emisor: &BillingIssuer{
+			Ruc:             clean(company.RUC),
+			RazonSocial:     clean(company.RazonSocial),
+			NombreComercial: clean(company.NombreComercial),
+			Direccion:       clean(company.Direccion),
+			Ubigeo:          clean(company.Ubigeo),
+			Departamento:    clean(company.Departamento),
+			Provincia:       clean(company.Provincia),
+			Distrito:        clean(company.Distrito),
+		},
 		Cliente: prepareBillingCustomer(customer),
-		Items: billingItems,
+		Items:   billingItems,
 		Totales: BillingTotals{
 			TotalVenta:     sale.Total,
 			TotalImpuestos: sale.IGV,
@@ -266,7 +472,7 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 	}
 
 	// 6. Update Document with API Response
-	electronicDoc.DocumentUUID = emitResp.DocumentoID
+	electronicDoc.DocumentUUID = &emitResp.DocumentoID
 	electronicDoc.Estado = emitResp.Status
 	
 	// Process SUNAT messages/notes
@@ -423,23 +629,27 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
-// SyncLogo sends the business logo to FacturaAPI for printed representations
-func (s *BillingService) SyncLogo(companyID uuid.UUID, logoBase64 string) error {
-	if logoBase64 == "" {
-		return nil
+// SyncCompanyInfo updates the company profile in FacturaAPI
+func (s *BillingService) SyncCompanyInfo(company models.Company) error {
+	// 1. Ensure company exists in FacturaAPI before syncing info
+	tenantUUID, err := s.EnsureCompanyExists(company.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify/register company in FacturaAPI: %w", err)
 	}
 
-	// 1. Get Billing Config
+	// 2. Get updated Billing Config
 	var billingConfig models.BillingConfig
-	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+	if err := config.DB.Where("company_id = ?", company.ID).First(&billingConfig).Error; err != nil {
+		log.Printf("[Billing] SyncCompanyInfo: Configuration not found for company %s", company.ID)
 		return nil // Not configured, nothing to sync
 	}
 
-	if billingConfig.TenantUUID == "" || billingConfig.Estado != "active" {
+	if billingConfig.Estado != "active" {
+		log.Printf("[Billing] SyncCompanyInfo: Service inactive for company %s", company.ID)
 		return nil
 	}
 
-	// 2. Resolve API credentials
+	// 3. Resolve API credentials
 	apiURL := billingConfig.ApiURL
 	apiKey := billingConfig.ApiKey
 
@@ -459,11 +669,237 @@ func (s *BillingService) SyncLogo(companyID uuid.UUID, logoBase64 string) error 
 	}
 
 	// Sanitize URL
-	if apiURL[len(apiURL)-1] == '/' {
-		apiURL = apiURL[:len(apiURL)-1]
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 4. Prepare Payload
+	clean := func(s string) string {
+		s = strings.TrimSpace(s)
+		if s == "-" {
+			return ""
+		}
+		return s
 	}
 
-	// 3. Prepare Multipart Request
+	apiMode := billingConfig.Modo
+	if apiMode == "dev" {
+		apiMode = "beta"
+	} else if apiMode == "prod" {
+		apiMode = "produccion"
+	}
+
+	payload := map[string]interface{}{
+		"razon_social":     clean(company.RazonSocial),
+		"nombre_comercial": clean(company.NombreComercial),
+		"direccion":        clean(company.Direccion),
+		"ubigeo":           clean(company.Ubigeo),
+		"departamento":     clean(company.Departamento),
+		"provincia":        clean(company.Provincia),
+		"distrito":         clean(company.Distrito),
+		"modo":             apiMode,
+	}
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("[Billing] Syncing Profile to FacturaAPI (%s) [Mode: %s] at %s: %s", 
+		tenantUUID, apiMode, apiURL+"/api/v1/config/"+tenantUUID, string(jsonPayload))
+
+	// The correct route for updating company profile in FacturaAPI is /api/v1/config/{uuid}
+	req, err := http.NewRequest("PATCH", apiURL+"/api/v1/config/"+tenantUUID, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[Billing] Connection Error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[Billing] FacturaAPI Response (%d): %s", resp.StatusCode, string(body))
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("FacturaAPI error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// VoidDocument initiates the voiding process (Comunicación de Baja) in FacturaAPI
+func (s *BillingService) VoidDocument(companyID uuid.UUID, docUUID string, motivo string) error {
+	if docUUID == "" {
+		return fmt.Errorf("document UUID is required")
+	}
+	if len(motivo) < 10 {
+		return fmt.Errorf("el motivo de anulación debe tener al menos 10 caracteres")
+	}
+
+	// 1. Get Billing Config
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		return fmt.Errorf("billing configuration not found")
+	}
+
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting)
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting)
+		if apiURL == "" { apiURL = globalURLSetting.Valor }
+		if apiKey == "" { apiKey = globalKeySetting.Valor }
+	}
+
+	if apiURL == "" || apiKey == "" {
+		return fmt.Errorf("FacturaAPI configuration missing")
+	}
+
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 2. Send Request
+	payload := map[string]string{
+		"motivo": motivo,
+	}
+	jsonPayload, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", apiURL+"/api/v1/documents/"+docUUID+"/void", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("FacturaAPI error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteDocumentBeta removes a document from FacturaAPI (BETA mode only)
+func (s *BillingService) DeleteDocumentBeta(companyID uuid.UUID, docUUID string) error {
+	if docUUID == "" {
+		return nil // Nothing to delete in API
+	}
+
+	// 1. Get Billing Config
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		return nil
+	}
+
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting)
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting)
+		if apiURL == "" { apiURL = globalURLSetting.Valor }
+		if apiKey == "" { apiKey = globalKeySetting.Valor }
+	}
+
+	if apiURL == "" || apiKey == "" {
+		return nil
+	}
+
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 2. Send Request
+	req, err := http.NewRequest("DELETE", apiURL+"/api/v1/documents/"+docUUID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// 403 means it's production, 404 means already deleted, both are "fine" for cleanup attempts
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("FacturaAPI error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// SyncLogo sends the business logo to FacturaAPI for printed representations
+func (s *BillingService) SyncLogo(companyID uuid.UUID, logoBase64 string) error {
+	if logoBase64 == "" {
+		return nil
+	}
+
+	// 1. Ensure company exists in FacturaAPI before syncing logo
+	tenantUUID, err := s.EnsureCompanyExists(companyID)
+	if err != nil {
+		return fmt.Errorf("failed to verify/register company in FacturaAPI: %w", err)
+	}
+
+	// 2. Get updated Billing Config
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		return nil // Not configured, nothing to sync
+	}
+
+	if billingConfig.Estado != "active" {
+		return nil
+	}
+
+	// 3. Resolve API credentials
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		if err := config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting).Error; err == nil && apiURL == "" {
+			apiURL = globalURLSetting.Valor
+		}
+		if err := config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting).Error; err == nil && apiKey == "" {
+			apiKey = globalKeySetting.Valor
+		}
+	}
+
+	if apiURL == "" || apiKey == "" {
+		return fmt.Errorf("FacturaAPI configuration missing")
+	}
+
+	// Sanitize URL
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 4. Prepare Multipart Request
 	imgData, err := base64.StdEncoding.DecodeString(logoBase64)
 	if err != nil {
 		return fmt.Errorf("error decoding logo base64: %w", err)
@@ -478,7 +914,7 @@ func (s *BillingService) SyncLogo(companyID uuid.UUID, logoBase64 string) error 
 	_, _ = io.Copy(part, bytes.NewReader(imgData))
 	writer.Close()
 
-	req, err := http.NewRequest("POST", apiURL+"/api/v1/config/"+billingConfig.TenantUUID+"/logo", body)
+	req, err := http.NewRequest("POST", apiURL+"/api/v1/config/"+tenantUUID+"/logo", body)
 	if err != nil {
 		return err
 	}

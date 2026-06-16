@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
-	"net/url"
+	"strings"
 	"time"
 	"veterinaria/backend/config"
 	"veterinaria/backend/models"
+	"veterinaria/backend/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -70,6 +72,7 @@ func SaveBillingConfig(c *gin.Context) {
 		CertificadoPassword string `json:"certificado_password"`
 		ClientID            string `json:"client_id"`
 		ClientSecret        string `json:"client_secret"`
+		EmisionDiferida     bool   `json:"emision_diferida"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -90,6 +93,7 @@ func SaveBillingConfig(c *gin.Context) {
 	billingConfig.SolPass = input.SolPass
 	billingConfig.ClientID = input.ClientID
 	billingConfig.ClientSecret = input.ClientSecret
+	billingConfig.EmisionDiferida = input.EmisionDiferida
 	if input.CertificadoBase64 != "" {
 		billingConfig.CertificadoBase64 = input.CertificadoBase64
 	}
@@ -119,100 +123,41 @@ func SaveBillingConfig(c *gin.Context) {
 	}
 	
 	// Sanitize URL
-	if len(apiURL) > 0 && apiURL[len(apiURL)-1] == '/' {
-		apiURL = apiURL[:len(apiURL)-1]
-	}
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
 
 	var logs []string
 	uuidStr := input.TenantUUID
 
 	// Call external FacturaAPI only if API URL & Key are present
 	if apiURL != "" && apiKey != "" {
-		client := &http.Client{Timeout: 20 * time.Second}
-
-		// Step A: Register / Search Company
-		if uuidStr == "" {
-			logs = append(logs, fmt.Sprintf("Buscando empresa con RUC %s en FacturaAPI...", company.RUC))
-			
-			reqSearch, err := http.NewRequest("GET", apiURL+"/api/v1/companies/search?ruc="+url.QueryEscape(company.RUC), nil)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar búsqueda de empresa: " + err.Error()})
-				return
-			}
-			reqSearch.Header.Set("Authorization", "Bearer "+apiKey)
-			reqSearch.Header.Set("Accept", "application/json")
-
-			respSearch, err := client.Do(reqSearch)
-			if err == nil {
-				defer respSearch.Body.Close()
-				bodyBytes, _ := io.ReadAll(respSearch.Body)
-				
-				if respSearch.StatusCode == http.StatusOK {
-					var result struct {
-						UUID string `json:"uuid"`
-					}
-					if err := json.Unmarshal(bodyBytes, &result); err == nil && result.UUID != "" {
-						uuidStr = result.UUID
-						logs = append(logs, "Empresa encontrada en FacturaAPI con UUID: "+uuidStr)
-					}
-				}
-			}
-
-			// If still empty, register it
-			if uuidStr == "" {
-				logs = append(logs, "Empresa no encontrada. Registrando en FacturaAPI...")
-				
-				regPayload := map[string]string{
-					"ruc":          company.RUC,
-					"razon_social": company.RazonSocial,
-					"direccion":    company.Direccion,
-					"modo":         input.Modo,
-				}
-				jsonPayload, _ := json.Marshal(regPayload)
-				
-				reqReg, err := http.NewRequest("POST", apiURL+"/api/v1/companies/register", bytes.NewBuffer(jsonPayload))
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar registro: " + err.Error()})
-					return
-				}
-				reqReg.Header.Set("Authorization", "Bearer "+apiKey)
-				reqReg.Header.Set("Content-Type", "application/json")
-				reqReg.Header.Set("Accept", "application/json")
-
-				respReg, err := client.Do(reqReg)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al conectar con FacturaAPI para registro: " + err.Error()})
-					return
-				}
-				defer respReg.Body.Close()
-				bodyBytes, _ := io.ReadAll(respReg.Body)
-
-				if respReg.StatusCode != http.StatusCreated && respReg.StatusCode != http.StatusOK {
-					errMsg := fmt.Sprintf("Error registro FacturaAPI (%d): %s", respReg.StatusCode, string(bodyBytes))
-					c.JSON(http.StatusBadGateway, gin.H{
-						"success":   false,
-						"logs":      logs,
-						"api_error": errMsg,
-						"error":     errMsg,
-					})
-					return
-				}
-
-				var result struct {
-					UUID string `json:"uuid"`
-				}
-				if err := json.Unmarshal(bodyBytes, &result); err == nil && result.UUID != "" {
-					uuidStr = result.UUID
-					logs = append(logs, "Empresa registrada exitosamente en FacturaAPI con UUID: "+uuidStr)
-				} else {
-					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "No se pudo obtener el UUID tras registro"})
-					return
-				}
-			}
-		}
+		billingService := services.NewBillingService()
 		
-		// Update DB BillingConfig struct to hold final TenantUUID
+		// Ensure company exists in FacturaAPI
+		logs = append(logs, "Verificando empresa en FacturaAPI...")
+		finalUUID, err := billingService.EnsureCompanyExists(companyID)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"success": false,
+				"logs":    logs,
+				"error":   "Error al verificar/registrar empresa en FacturaAPI: " + err.Error(),
+			})
+			return
+		}
+		uuidStr = finalUUID
 		billingConfig.TenantUUID = uuidStr
+		logs = append(logs, "Empresa verificada/registrada correctamente con UUID: "+uuidStr)
+
+		// Save/Update in DB so subsequent steps (which might re-load from DB) see the updated UUID
+		config.DB.Save(&billingConfig)
+
+		// Sync full company info (address, ubigeo, etc) to FacturaAPI
+		logs = append(logs, "Sincronizando perfil fiscal de la empresa...")
+		if syncErr := billingService.SyncCompanyInfo(company); syncErr != nil {
+			logs = append(logs, "Aviso: Error al sincronizar perfil fiscal: "+syncErr.Error())
+		} else {
+			logs = append(logs, "Perfil fiscal sincronizado correctamente.")
+		}
 
 		// Step B: PATCH Credentials
 		if uuidStr != "" {
@@ -225,12 +170,15 @@ func SaveBillingConfig(c *gin.Context) {
 			}
 			jsonCreds, _ := json.Marshal(credPayload)
 
+			// We still use the client directly here for custom patches not in service
+			client := &http.Client{Timeout: 20 * time.Second}
 			reqCred, err := http.NewRequest("PATCH", apiURL+"/api/v1/config/"+uuidStr+"/sunat-credentials", bytes.NewBuffer(jsonCreds))
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al preparar PATCH credenciales: " + err.Error()})
 				return
 			}
 			reqCred.Header.Set("Authorization", "Bearer "+apiKey)
+			reqCred.Header.Set("X-API-Key", apiKey)
 			reqCred.Header.Set("Content-Type", "application/json")
 			reqCred.Header.Set("Accept", "application/json")
 
@@ -277,6 +225,7 @@ func SaveBillingConfig(c *gin.Context) {
 					return
 				}
 				reqCert.Header.Set("Authorization", "Bearer "+apiKey)
+				reqCert.Header.Set("X-API-Key", apiKey)
 				reqCert.Header.Set("Content-Type", "application/json")
 				reqCert.Header.Set("Accept", "application/json")
 
@@ -324,6 +273,7 @@ func SaveBillingConfig(c *gin.Context) {
 							logs = append(logs, "Error al preparar subida de logo: "+err.Error())
 						} else {
 							reqLogo.Header.Set("Authorization", "Bearer "+apiKey)
+							reqLogo.Header.Set("X-API-Key", apiKey)
 							reqLogo.Header.Set("Content-Type", writer.FormDataContentType())
 							reqLogo.Header.Set("Accept", "application/json")
 
@@ -405,9 +355,9 @@ func GetBillingFiles(c *gin.Context) {
 		}
 	}
 
-	if len(apiURL) > 0 && apiURL[len(apiURL)-1] == '/' {
-		apiURL = apiURL[:len(apiURL)-1]
-	}
+	// Sanitize URL
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
 
 	if apiURL == "" || apiKey == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "FacturaAPI global configuration missing"})
@@ -633,5 +583,523 @@ func UpdateBillingSeries(c *gin.Context) {
 		"success": true,
 		"message": "Series y correlativos actualizados correctamente",
 		"data":    branch,
+	})
+}
+
+// ResendElectronicDocument attempts to re-emit an electronic document
+func ResendElectronicDocument(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	docIDStr := c.Param("id")
+	docID, err := uuid.Parse(docIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido"})
+		return
+	}
+
+	var doc models.ElectronicDocument
+	if err := config.DB.Preload("Sale").Where("id = ? AND company_id = ?", docID, companyID).First(&doc).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Comprobante no encontrado"})
+		return
+	}
+
+	if doc.Estado == "accepted" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El comprobante ya fue aceptado por SUNAT"})
+		return
+	}
+
+	if doc.Sale == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Venta asociada no encontrada"})
+		return
+	}
+
+	// Fetch Sale Items
+	var items []models.SaleItem
+	if err := config.DB.Where("sale_id = ?", doc.Sale.ID).Find(&items).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al recuperar items de la venta"})
+		return
+	}
+
+	// Emit again (Service now handles updating existing DB records by sale_id)
+	billingService := services.NewBillingService()
+	_, err = billingService.EmitSale(*doc.Sale, items)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": "Error al re-emitir: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Comprobante re-enviado exitosamente",
+	})
+}
+
+// SyncElectronicDocumentStatus queries FacturaAPI for the latest status of a document
+func SyncElectronicDocumentStatus(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	docIDStr := c.Param("id")
+	docID, err := uuid.Parse(docIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido"})
+		return
+	}
+
+	var doc models.ElectronicDocument
+	if err := config.DB.Where("id = ? AND company_id = ?", docID, companyID).First(&doc).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Comprobante no encontrado"})
+		return
+	}
+
+	if doc.DocumentUUID == nil || *doc.DocumentUUID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El comprobante no tiene un identificador de la API"})
+		return
+	}
+
+	// 1. Get Billing Config for credentials
+	var billingConfig models.BillingConfig
+	if err := config.DB.Where("company_id = ?", companyID).First(&billingConfig).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Configuración de facturación no encontrada"})
+		return
+	}
+
+	apiURL := billingConfig.ApiURL
+	apiKey := billingConfig.ApiKey
+	if apiURL == "" || apiKey == "" {
+		var globalURLSetting models.CompanySetting
+		var globalKeySetting models.CompanySetting
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_url").First(&globalURLSetting)
+		config.DB.Where("company_id = ? AND clave = ?", uuid.Nil, "factura_api_key").First(&globalKeySetting)
+		if apiURL == "" { apiURL = globalURLSetting.Valor }
+		if apiKey == "" { apiKey = globalKeySetting.Valor }
+	}
+
+	if apiURL == "" || apiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Configuración API incompleta"})
+		return
+	}
+
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	apiURL = strings.TrimSuffix(apiURL, "/api/v1")
+
+	// 2. Query Status
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", apiURL+"/api/v1/documents/"+*doc.DocumentUUID+"/status", nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al conectar con la API: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{"success": false, "error": fmt.Sprintf("Error API (%d): %s", resp.StatusCode, string(body))})
+		return
+	}
+
+	var statusResp struct {
+		Status           string `json:"status"`
+		SunatResponse    string `json:"sunat_response"`
+		SunatDescription string `json:"sunat_description"`
+		SunatNotes       string `json:"sunat_notes"`
+		Files            struct {
+			XML string `json:"xml"`
+			CDR string `json:"cdr"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(body, &statusResp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al procesar respuesta de estado"})
+		return
+	}
+
+	// 3. Update DB
+	billingService := services.NewBillingService()
+	doc.Estado = statusResp.Status
+
+	// 4. Fetch files if they are not included in status response (usually happens with async)
+	if statusResp.Files.CDR == "" && (doc.Estado == "accepted" || doc.Estado == "rejected" || doc.Estado == "error") {
+		reqFiles, err := http.NewRequest("GET", apiURL+"/api/v1/documents/"+*doc.DocumentUUID+"/files", nil)
+		if err == nil {
+			reqFiles.Header.Set("Authorization", "Bearer "+apiKey)
+			reqFiles.Header.Set("Accept", "application/json")
+			respFiles, err := client.Do(reqFiles)
+			if err == nil {
+				defer respFiles.Body.Close()
+				bodyFiles, _ := io.ReadAll(respFiles.Body)
+				if respFiles.StatusCode == http.StatusOK {
+					var filesResp struct {
+						Files struct {
+							XML string `json:"xml"`
+							CDR string `json:"cdr"`
+						} `json:"files"`
+					}
+					if err := json.Unmarshal(bodyFiles, &filesResp); err == nil {
+						if filesResp.Files.XML != "" {
+							doc.XmlURL = filesResp.Files.XML
+						}
+						if filesResp.Files.CDR != "" {
+							doc.CdrURL = filesResp.Files.CDR
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Process messages
+	sunatMsg := statusResp.SunatResponse
+	if sunatMsg == "" {
+		sunatMsg = statusResp.SunatDescription
+	}
+	if statusResp.SunatNotes != "" {
+		if sunatMsg != "" {
+			sunatMsg += "\n" + statusResp.SunatNotes
+		} else {
+			sunatMsg = statusResp.SunatNotes
+		}
+	}
+	
+	doc.SunatResponse = billingService.ParseSunatResponse(sunatMsg)
+	
+	// Update URLs if provided
+	if statusResp.Files.XML != "" {
+		doc.XmlURL = statusResp.Files.XML
+	}
+	if statusResp.Files.CDR != "" {
+		doc.CdrURL = statusResp.Files.CDR
+	}
+	
+	// If the CDR URL exists and we don't have detailed notes from the API directly, try to extract from CDR
+	if doc.CdrURL != "" {
+		cdrNotes, err := billingService.ExtractNotesFromCDR(doc.CdrURL)
+		if err == nil && cdrNotes != "" {
+			if doc.SunatResponse != "" {
+				// Only append if it's new information to avoid duplicates
+				if !strings.Contains(doc.SunatResponse, cdrNotes) {
+					doc.SunatResponse += "\n" + cdrNotes
+				}
+			} else {
+				doc.SunatResponse = cdrNotes
+			}
+		}
+	}
+	
+	// Identify Observations
+
+	if doc.Estado == "accepted" && doc.SunatResponse != "" {
+		doc.Observaciones = doc.SunatResponse
+	} else {
+		doc.Observaciones = "" // Clear if no longer accepted or no notes
+	}
+
+	config.DB.Save(&doc)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Estado sincronizado correctamente",
+		"data":    doc,
+	})
+}
+
+// BatchEmitDrafts processes all 'draft' documents for a company
+func BatchEmitDrafts(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	// 1. Get all draft documents
+	var drafts []models.ElectronicDocument
+	if err := config.DB.Where("company_id = ? AND estado = 'draft'", companyID).Find(&drafts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al recuperar borradores"})
+		return
+	}
+
+	if len(drafts) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "No hay documentos pendientes de emitir"})
+		return
+	}
+
+	billingService := services.NewBillingService()
+	successCount := 0
+	errorCount := 0
+
+	for _, doc := range drafts {
+		if doc.SaleID == nil {
+			continue
+		}
+
+		// Load sale and items
+		var sale models.Sale
+		if err := config.DB.First(&sale, *doc.SaleID).Error; err != nil {
+			errorCount++
+			continue
+		}
+
+		var items []models.SaleItem
+		if err := config.DB.Where("sale_id = ?", sale.ID).Find(&items).Error; err != nil {
+			errorCount++
+			continue
+		}
+
+		// Emit
+		_, err := billingService.EmitSale(sale, items)
+		if err != nil {
+			errorCount++
+			log.Printf("[BatchEmit] Error emitting %s-%s: %v", doc.Serie, doc.Numero, err)
+		} else {
+			successCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Proceso terminado. Éxitos: %d, Errores: %d", successCount, errorCount),
+		"data": gin.H{
+			"success": successCount,
+			"errors":  errorCount,
+		},
+	})
+}
+
+// UpdateElectronicDocumentDraft updates customer data of a draft document
+func UpdateElectronicDocumentDraft(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	docIDStr := c.Param("id")
+	docID, err := uuid.Parse(docIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido"})
+		return
+	}
+
+	var input struct {
+		RazonSocial            string `json:"razon_social" binding:"required"`
+		Direccion              string `json:"direccion"`
+		TipoDocumentoIdentidad string `json:"tipo_documento_identidad"`
+		NumeroDocumento        string `json:"numero_documento"`
+		Serie                  string `json:"serie"`
+		Numero                 string `json:"numero"`
+		FechaEmision           string `json:"fecha_emision"`
+		Items                  []struct {
+			ID             uuid.UUID `json:"id"`
+			Cantidad       float64   `json:"cantidad"`
+			PrecioUnitario float64   `json:"precio_unitario"`
+		} `json:"items"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	var doc models.ElectronicDocument
+	if err := config.DB.Where("id = ? AND company_id = ?", docID, companyID).First(&doc).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Comprobante no encontrado"})
+		return
+	}
+
+	if doc.Estado != "draft" {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Solo se pueden editar documentos en estado borrador"})
+		return
+	}
+
+	if doc.SaleID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El documento no tiene una venta asociada"})
+		return
+	}
+
+	tx := config.DB.Begin()
+
+	// 1. Update Customer info (Global record update)
+	var sale models.Sale
+	if err := tx.First(&sale, *doc.SaleID).Error; err == nil {
+		var customer models.Customer
+		if err := tx.First(&customer, sale.CustomerID).Error; err == nil {
+			customer.Nombre = input.RazonSocial
+			customer.Direccion = input.Direccion
+			if input.TipoDocumentoIdentidad != "" {
+				customer.TipoDocumento = input.TipoDocumentoIdentidad
+			}
+			if input.NumeroDocumento != "" {
+				customer.NumeroDocumento = input.NumeroDocumento
+			}
+			tx.Save(&customer)
+		}
+
+		// 2. Update Items and Recalculate Totals
+		if len(input.Items) > 0 {
+			var newTotalVenta, newTotalSubtotal, newTotalIGV float64
+
+			for _, itemUpdate := range input.Items {
+				var si models.SaleItem
+				if err := tx.Where("id = ? AND sale_id = ?", itemUpdate.ID, sale.ID).First(&si).Error; err == nil {
+					// Apply new values
+					si.Cantidad = itemUpdate.Cantidad
+					si.PrecioUnitario = itemUpdate.PrecioUnitario
+					
+					// Recalculate line totals (Assuming 18% IGV - standard for this app)
+					lineTotal := si.Cantidad * si.PrecioUnitario
+					si.Subtotal = lineTotal / 1.18
+					si.IGV = lineTotal - si.Subtotal
+					
+					tx.Save(&si)
+
+					newTotalVenta += lineTotal
+					newTotalSubtotal += si.Subtotal
+					newTotalIGV += si.IGV
+				}
+			}
+
+			// Update Sale header with new totals
+			sale.Total = newTotalVenta
+			sale.Subtotal = newTotalSubtotal
+			sale.IGV = newTotalIGV
+		}
+
+		// 3. Update Sale header metadata
+		if input.Serie != "" { sale.Serie = input.Serie }
+		if input.Numero != "" { sale.Numero = input.Numero }
+		if input.FechaEmision != "" {
+			t, err := time.Parse("2006-01-02", input.FechaEmision)
+			if err == nil {
+				sale.CreatedAt = t
+			}
+		}
+		tx.Save(&sale)
+	}
+
+	// 4. Update Document sync info
+	if input.Serie != "" { doc.Serie = input.Serie }
+	if input.Numero != "" { doc.Numero = input.Numero }
+	
+	doc.Observaciones = "Editado manualmente (Detalles y Totales). " + doc.Observaciones
+	tx.Save(&doc)
+
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Comprobante integral actualizado correctamente",
+		"data":    doc,
+	})
+}
+
+// DeleteElectronicDocumentTest removes a document from the system in TEST mode only
+func DeleteElectronicDocumentTest(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	docIDStr := c.Param("id")
+	docID, err := uuid.Parse(docIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido"})
+		return
+	}
+
+	var doc models.ElectronicDocument
+	if err := config.DB.Where("id = ? AND company_id = ?", docID, companyID).First(&doc).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Comprobante no encontrado"})
+		return
+	}
+
+	// 1. Check if we are in DEV mode
+	var billingConfig models.BillingConfig
+	config.DB.Where("company_id = ?", companyID).First(&billingConfig)
+
+	if billingConfig.Modo != "dev" && billingConfig.Modo != "beta" {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Esta acción solo está permitida en modo Desarrollo/Beta"})
+		return
+	}
+
+	// 2. Try to delete from FacturaAPI if UUID exists
+	if doc.DocumentUUID != nil && *doc.DocumentUUID != "" {
+		billingService := services.NewBillingService()
+		_ = billingService.DeleteDocumentBeta(companyID, *doc.DocumentUUID) // Best effort
+	}
+
+	// 3. Delete from local DB
+	if err := config.DB.Delete(&doc).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Error al eliminar registro: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Comprobante eliminado del sistema (Modo Prueba)",
+	})
+}
+
+// VoidElectronicDocument initiates the legal voiding process (Baja) for Facturas/GRE
+func VoidElectronicDocument(c *gin.Context) {
+	companyIDRaw, _ := c.Get("companyID")
+	companyID := companyIDRaw.(uuid.UUID)
+
+	docIDStr := c.Param("id")
+	docID, err := uuid.Parse(docIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "ID de documento inválido"})
+		return
+	}
+
+	var input struct {
+		Motivo string `json:"motivo" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El motivo de anulación es obligatorio (mín. 10 caracteres)"})
+		return
+	}
+
+	if len(input.Motivo) < 10 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El motivo de anulación debe tener al menos 10 caracteres"})
+		return
+	}
+
+	var doc models.ElectronicDocument
+	if err := config.DB.Where("id = ? AND company_id = ?", docID, companyID).First(&doc).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Comprobante no encontrado"})
+		return
+	}
+
+	if doc.TipoDocumento == "03" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Las Boletas de Venta no se pueden anular por baja. Debe emitir una Nota de Crédito."})
+		return
+	}
+
+	if doc.Estado == "voided" || doc.Estado == "void_pending" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El comprobante ya está en proceso de anulación o ya fue anulado"})
+		return
+	}
+
+	if doc.DocumentUUID == nil || *doc.DocumentUUID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "El comprobante no tiene un identificador de la API para anular"})
+		return
+	}
+
+	billingService := services.NewBillingService()
+	err = billingService.VoidDocument(companyID, *doc.DocumentUUID, input.Motivo)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": "Error al anular en FacturaAPI: " + err.Error()})
+		return
+	}
+
+	// Update local state to void_pending
+	doc.Estado = "void_pending"
+	doc.Observaciones = "Anulación solicitada: " + input.Motivo
+	config.DB.Save(&doc)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Solicitud de anulación (Baja) enviada correctamente",
+		"data":    doc,
 	})
 }

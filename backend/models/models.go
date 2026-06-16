@@ -34,6 +34,10 @@ type Company struct {
 	Email           string `gorm:"type:varchar(100)" json:"email"`
 	LogoBase64      string `gorm:"type:text" json:"logo_base64"`
 	Estado          string `gorm:"type:varchar(50);default:'active'" json:"estado"` // active, inactive
+	Ubigeo          string `gorm:"type:varchar(6)" json:"ubigeo"`
+	Departamento    string `gorm:"type:varchar(100)" json:"departamento"`
+	Provincia       string `gorm:"type:varchar(100)" json:"provincia"`
+	Distrito        string `gorm:"type:varchar(100)" json:"distrito"`
 }
 
 // Branch belongs to a Company
@@ -163,15 +167,28 @@ type Supplier struct {
 // Purchase header
 type Purchase struct {
 	BaseModel
-	CompanyID   uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
-	BranchID    uuid.UUID `gorm:"type:uuid;not null;index" json:"branch_id"`
-	SupplierID  uuid.UUID `gorm:"type:uuid;not null;index" json:"supplier_id"`
-	Supplier    Supplier  `gorm:"foreignKey:SupplierID" json:"supplier"`
-	Fecha       time.Time `json:"fecha"`
-	Subtotal    float64   `gorm:"type:numeric(12,4);default:0" json:"subtotal"`
-	IGV         float64   `gorm:"type:numeric(12,4);default:0" json:"igv"`
-	Total       float64   `gorm:"type:numeric(12,4);default:0" json:"total"`
-	Estado      string    `gorm:"type:varchar(50);default:'draft'" json:"estado"` // draft, completed, cancelled
+	CompanyID         uuid.UUID            `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID          uuid.UUID            `gorm:"type:uuid;not null;index" json:"branch_id"`
+	SupplierID        uuid.UUID            `gorm:"type:uuid;not null;index" json:"supplier_id"`
+	Supplier          Supplier             `gorm:"foreignKey:SupplierID" json:"supplier"`
+	Fecha             time.Time            `json:"fecha"`
+	Subtotal          float64              `gorm:"type:numeric(12,4);default:0" json:"subtotal"`
+	IGV               float64              `gorm:"type:numeric(12,4);default:0" json:"igv"`
+	Total             float64              `gorm:"type:numeric(12,4);default:0" json:"total"`
+	Estado            string               `gorm:"type:varchar(50);default:'draft'" json:"estado"` // draft, completed, cancelled
+	TipoComprobante   string               `gorm:"type:varchar(100)" json:"tipo_comprobante"`
+	NumeroComprobante string               `gorm:"type:varchar(100)" json:"numero_comprobante"`
+	ComprobanteUrl    string               `gorm:"type:varchar(500)" json:"comprobante_url"`
+	Attachments       []PurchaseAttachment `gorm:"foreignKey:PurchaseID" json:"attachments,omitempty"`
+}
+
+// PurchaseAttachment stores files associated with a purchase
+type PurchaseAttachment struct {
+	BaseModel
+	PurchaseID  uuid.UUID `gorm:"type:uuid;not null;index" json:"purchase_id"`
+	Nombre      string    `gorm:"type:varchar(255);not null" json:"nombre"`
+	Url         string    `gorm:"type:varchar(500);not null" json:"url"`
+	Descripcion string    `gorm:"type:varchar(500)" json:"descripcion"`
 }
 
 // PurchaseItem detail
@@ -234,8 +251,12 @@ type SaleItem struct {
 	SaleID         uuid.UUID `gorm:"type:uuid;not null;index" json:"sale_id"`
 	ProductID      uuid.UUID `gorm:"type:uuid;not null" json:"product_id"`
 	Cantidad       float64   `gorm:"type:numeric(12,4);not null" json:"cantidad"`
-	PrecioUnitario float64   `gorm:"type:numeric(12,4);not null" json:"precio_unitario"`
+	PrecioUnitario float64   `gorm:"type:numeric(12,4);not null" json:"precio_unitario"` // Con IGV
+	Subtotal       float64   `gorm:"type:numeric(12,4);default:0" json:"subtotal"`        // Sin IGV
+	IGV            float64   `gorm:"type:numeric(12,4);default:0" json:"igv"`             // Monto IGV
 	Descuento      float64   `gorm:"type:numeric(12,4);default:0" json:"descuento"`
+	TipoAfectacion string    `gorm:"type:varchar(2);default:'10'" json:"tipo_afectacion"` // Catálogo 07 (10=Gravado)
+	UnidadSUNAT    string    `gorm:"type:varchar(10);default:'NIU'" json:"unidad_sunat"`  // Catálogo 03 (NIU=Unidad)
 }
 
 // BillingConfig configurations for FacturaAPI
@@ -254,6 +275,7 @@ type BillingConfig struct {
 	ClientID          string    `gorm:"type:varchar(255)" json:"client_id"`
 	ClientSecret      string    `gorm:"type:varchar(255)" json:"client_secret"`
 	LogoBase64        string    `gorm:"type:text" json:"logo_base64"`
+	EmisionDiferida   bool      `gorm:"type:boolean;default:false" json:"emision_diferida"`
 }
 
 // ElectronicDocument billing record
@@ -262,7 +284,7 @@ type ElectronicDocument struct {
 	CompanyID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"company_id"`
 	SaleID       *uuid.UUID `gorm:"type:uuid;index" json:"sale_id,omitempty"`
 	Sale         *Sale      `gorm:"foreignKey:SaleID" json:"sale,omitempty"`
-	DocumentUUID string     `gorm:"type:varchar(255);uniqueIndex" json:"document_uuid"`
+	DocumentUUID *string    `gorm:"type:varchar(255);uniqueIndex" json:"document_uuid"`
 	TipoDocumento string     `gorm:"type:varchar(2);not null" json:"tipo_documento"` // 01=Factura, 03=Boleta, etc.
 	Serie        string     `gorm:"type:varchar(4);not null" json:"serie"`
 	Numero       string     `gorm:"type:varchar(8);not null" json:"numero"`
@@ -270,6 +292,10 @@ type ElectronicDocument struct {
 	PdfURL       string     `gorm:"type:varchar(500)" json:"pdf_url"`
 	XmlURL       string     `gorm:"type:varchar(500)" json:"xml_url"`
 	CdrURL       string     `gorm:"type:varchar(500)" json:"cdr_url"`
+	SunatResponse string    `gorm:"type:text" json:"sunat_response"`
+	FacturacionError string `gorm:"type:text" json:"facturacion_error"`
+	FacturacionPayload string `gorm:"type:text" json:"facturacion_payload"`
+	Observaciones string    `gorm:"type:text" json:"observaciones"`
 }
 
 // AuditLog audit action registry
