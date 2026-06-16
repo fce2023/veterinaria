@@ -494,7 +494,7 @@
                     title="Click para ver detalle de SUNAT"
                   >
                     <span class="badge-dot"></span>
-                    {{ (doc.observaciones && doc.estado === 'accepted' ? 'OBSERVADO' : doc.estado).toUpperCase() }}
+                    {{ formatEstado(doc) }}
                   </span>
                   <button
                     v-if="doc.estado === 'pending' || doc.estado === 'error' || doc.estado === 'rejected'"
@@ -599,7 +599,7 @@
               <div v-if="selectedDoc" class="msg-box" :class="'msg-box--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
                 <div class="msg-box-header">
                   <span class="badge" :class="'badge--' + (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'warning' : selectedDoc.estado)">
-                    {{ (selectedDoc.observaciones && selectedDoc.estado === 'accepted' ? 'OBSERVADO' : selectedDoc.estado).toUpperCase() }}
+                    {{ formatEstado(selectedDoc) }}
                   </span>
                   <span class="font-mono text-[11px]">{{ selectedDoc.serie }}-{{ selectedDoc.numero }}</span>
                 </div>
@@ -1421,6 +1421,21 @@ async function downloadFile(uuid: string, type: 'pdf' | 'xml' | 'cdr') {
     } else {
       alert('No se pudo recuperar el archivo: ' + (err.response?.data?.error || 'el comprobante está en modo pruebas y no tiene archivos guardados en el servidor.'))
     }
+  }
+}
+
+function formatEstado(doc: any): string {
+  if (!doc) return ''
+  if (doc.observaciones && doc.estado === 'accepted') return 'OBSERVADO'
+  
+  switch (doc.estado) {
+    case 'accepted': return 'ACEPTADO'
+    case 'rejected': return 'RECHAZADO'
+    case 'pending': return 'PENDIENTE'
+    case 'voided': return 'ANULADO'
+    case 'error': return 'ERROR'
+    case 'draft': return 'BORRADOR'
+    default: return (doc.estado || '').toUpperCase()
   }
 }
 
