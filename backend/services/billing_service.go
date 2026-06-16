@@ -84,6 +84,7 @@ type EmitPayload struct {
 	Items      []BillingItem      `json:"items"`
 	Totales    BillingTotals      `json:"totales"`
 	Detraccion *BillingDetraccion `json:"detraccion,omitempty"`
+	CorrelativoPadding *int       `json:"correlativo_padding,omitempty"`
 }
 
 type EmitResponse struct {
@@ -404,6 +405,11 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 		},
 	}
 
+	// 1.5.1 Add Correlativo Padding to payload for API consistency
+	if billingConfig.CorrelativoPadding != nil {
+		payload.CorrelativoPadding = billingConfig.CorrelativoPadding
+	}
+
 	if sale.TipoDocumento == "01" && hasServices && sale.Total > 700 {
 		payload.Detraccion = &BillingDetraccion{
 			CodigoBienServicio: "022",
@@ -543,8 +549,20 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 		}
 	}
 
-	if electronicDoc.Estado == "accepted" && electronicDoc.SunatResponse != "" {
-		electronicDoc.Observaciones = electronicDoc.SunatResponse
+	// 7.5 Intelligent Observation Detection
+	// Only set Observaciones if it's NOT just a standard success message.
+	// Standard success looks like: "La Boleta numero B001-1, ha sido aceptada"
+	// Observations usually contain codes like (0060) or words like "observaciones", "advertencia"
+	hasObsKeywords := strings.Contains(msgLower, "observaci") || 
+					  strings.Contains(msgLower, "advertencia") || 
+					  strings.Contains(msgLower, "(") // Matches codes like (0060)
+
+	if electronicDoc.Estado == "accepted" {
+		if hasObsKeywords {
+			electronicDoc.Observaciones = electronicDoc.SunatResponse
+		} else {
+			electronicDoc.Observaciones = "" // Clear generic success messages
+		}
 	}
 
 	// 8. If the CDR URL exists, try to extract notes from it
@@ -558,7 +576,7 @@ func (s *BillingService) EmitSale(sale models.Sale, items []models.SaleItem) (*E
 			} else {
 				electronicDoc.SunatResponse = cdrNotes
 			}
-			// Update observations again with CDR notes if accepted
+			// If we got REAL notes from CDR, it's definitely observed
 			if electronicDoc.Estado == "accepted" {
 				electronicDoc.Observaciones = electronicDoc.SunatResponse
 			}
@@ -1189,13 +1207,32 @@ func (s *BillingService) SyncDocumentStatus(companyID uuid.UUID, doc *models.Ele
 		}
 	}
 
-	if doc.Estado == "accepted" && doc.SunatResponse != "" {
-		doc.Observaciones = doc.SunatResponse
+	// 5.5 Intelligent Observation Detection
+	hasObsKeywords := strings.Contains(msgLower, "observaci") || 
+					  strings.Contains(msgLower, "advertencia") || 
+					  strings.Contains(msgLower, "(")
+
+	if doc.Estado == "accepted" {
+		if hasObsKeywords {
+			doc.Observaciones = doc.SunatResponse
+		} else {
+			doc.Observaciones = "" // Clear generic success messages
+		}
 	}
 
-	// Ensure PDF URL is set
+	// Ensure PDF URL is set with correct base
 	if doc.PdfURL == "" && doc.DocumentUUID != nil {
 		doc.PdfURL = apiURL + "/api/v1/download/" + *doc.DocumentUUID + "/pdf"
+	}
+
+	// Re-check CDR notes to potentially re-enable observations
+	if doc.CdrURL != "" {
+		cdrNotes, err := s.ExtractNotesFromCDR(doc.CdrURL)
+		if err == nil && cdrNotes != "" {
+			if doc.Estado == "accepted" {
+				doc.Observaciones = doc.SunatResponse
+			}
+		}
 	}
 
 	// Use explicit updates to avoid GORM skipping empty fields or failing hooks

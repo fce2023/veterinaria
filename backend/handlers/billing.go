@@ -1128,16 +1128,39 @@ func VoidElectronicDocument(c *gin.Context) {
 
 	// 6. Smart Status Detection (Fallback for inconsistent API status)
 	msgLower := strings.ToLower(doc.SunatResponse)
+	isAcceptedMsg := strings.Contains(msgLower, "aceptada") || 
+					 strings.Contains(msgLower, "aceptado") || 
+					 strings.Contains(msgLower, "exito") || 
+					 strings.Contains(msgLower, "éxito") ||
+					 doc.CdrURL != ""
+
+	isRejectedMsg := strings.Contains(msgLower, "rechazada") || 
+					 strings.Contains(msgLower, "rechazado") || 
+					 strings.Contains(msgLower, "error de datos")
+
 	if doc.Estado == "pending" || doc.Estado == "error" || doc.Estado == "" {
-		if strings.Contains(msgLower, "aceptada") || strings.Contains(msgLower, "ha sido aceptada") || doc.CdrURL != "" {
+		if isAcceptedMsg {
+			log.Printf("[Webhook] Smart Detection: Upgrading %s-%s from '%s' to accepted", 
+				doc.Serie, doc.Numero, doc.Estado)
 			doc.Estado = "accepted"
-		} else if strings.Contains(msgLower, "rechazada") || strings.Contains(msgLower, "ha sido rechazada") {
+		} else if isRejectedMsg {
+			log.Printf("[Webhook] Smart Detection: Upgrading %s-%s from '%s' to rejected", 
+				doc.Serie, doc.Numero, doc.Estado)
 			doc.Estado = "rejected"
 		}
 	}
 
-	if doc.Estado == "accepted" && doc.SunatResponse != "" {
-		doc.Observaciones = doc.SunatResponse
+	// 6.5 Intelligent Observation Detection
+	hasObsKeywords := strings.Contains(msgLower, "observaci") || 
+					  strings.Contains(msgLower, "advertencia") || 
+					  strings.Contains(msgLower, "(")
+
+	if doc.Estado == "accepted" {
+		if hasObsKeywords {
+			doc.Observaciones = doc.SunatResponse
+		} else {
+			doc.Observaciones = "" // Clear generic success messages
+		}
 	}
 
 	// 7. Ensure PDF URL is set
@@ -1160,14 +1183,21 @@ func VoidElectronicDocument(c *gin.Context) {
 		}
 	}
 
-	// 8. Save
-	if err := config.DB.Save(&doc).Error; err != nil {
-
-	log.Printf("[Webhook] Error saving document status: %v", err)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
-	return
+	// 8. Save with explicit Updates to avoid missing fields
+	updateData := map[string]interface{}{
+		"estado":          doc.Estado,
+		"sunat_response":  doc.SunatResponse,
+		"observaciones":   doc.Observaciones,
+		"xml_url":         doc.XmlURL,
+		"cdr_url":         doc.CdrURL,
+		"pdf_url":         doc.PdfURL,
+		"facturacion_error": "",
+	}
+	if err := config.DB.Model(&doc).Updates(updateData).Error; err != nil {
+		log.Printf("[Webhook] Error saving document status: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 	}
-
